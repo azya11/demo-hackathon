@@ -36,6 +36,7 @@ _EVENT_COLORS = {
     "tab_closed": "red",
     "tab_observed": "dim",
     "ai_classified": "magenta",
+    "mode_changed": "cyan",
 }
 
 _EVENT_FEED_LIMIT = 7
