@@ -19,7 +19,28 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+
 from app.session import SessionMode
+
+_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "help", "quit", "exit"]
+_MODE_ARGS = ["strict", "soft"]
+
+
+class _SlashCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor.lstrip()
+        if text.startswith("/mode "):
+            typed = text[len("/mode "):]
+            for m in _MODE_ARGS:
+                if m.startswith(typed):
+                    yield Completion("/mode " + m, start_position=-len(text))
+        elif text.startswith("/"):
+            typed = text[1:]
+            for cmd in _COMMANDS:
+                if cmd.startswith(typed):
+                    yield Completion("/" + cmd, start_position=-len(text))
 
 
 @dataclass
@@ -38,6 +59,8 @@ class CLI:
         self.orchestrator = orchestrator
         self.ui = ui
         self._running = False
+        import sys
+        self._session = PromptSession(completer=_SlashCompleter(), complete_while_typing=True) if sys.stdin.isatty() else None
         self._handlers = {
             "start": self._handle_start,
             "stop": self._handle_stop,
@@ -56,7 +79,7 @@ class CLI:
         self._running = True
         while self._running:
             try:
-                line = input(self.PROMPT).strip()
+                line = self._session.prompt(self.PROMPT).strip() if self._session else input(self.PROMPT).strip()
             except (EOFError, KeyboardInterrupt):
                 self.ui.info("bye")
                 break
