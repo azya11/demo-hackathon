@@ -79,10 +79,35 @@ aligned with your stated goal.
 /summary
 ```
 
+## Installation
+
+**macOS / Linux**
+```bash
+pip3 install rich prompt_toolkit
+```
+
+**Windows** (if `pip.exe` is blocked by Application Control policy)
+```powershell
+.venv/Scripts/python.exe -m pip install rich prompt_toolkit
+```
+
+## Running
+
+**macOS / Linux**
+```bash
+python3 -m app.main
+```
+
+**Windows**
+```powershell
+.venv/Scripts/python.exe -m app.main
+```
+
 ## Stack
 
 - Python 3.11+
 - Rich — terminal UI
+- prompt_toolkit — live slash-command completion
 - Playwright — controlled browser session
 - Google Generative AI (Gemini) — reasoning layer
 - SQLite — persistence
