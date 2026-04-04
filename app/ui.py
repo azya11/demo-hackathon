@@ -36,7 +36,7 @@ _EVENT_COLORS = {
     "tab_closed": "red",
     "tab_observed": "dim",
     "ai_classified": "magenta",
-    "mode_changed": "cyan",
+    "mode_changed": "medium_purple1",
 }
 
 _EVENT_FEED_LIMIT = 7
@@ -61,9 +61,9 @@ class UI:
         self.console.clear()
         body = (
             "An agent that protects your focus, not just tracks it.\n"
-            'Type [cyan]/help[/cyan] for commands, [cyan]/start "goal" 60[/cyan] to begin.'
+            'Type [medium_purple1]/help[/medium_purple1] for commands, [medium_purple1]/start "goal" 60[/medium_purple1] to begin.'
         )
-        self.console.print(Panel.fit(body, title="[bold cyan]Focus Guardian AI v0.1[/]", border_style="cyan"))
+        self.console.print(Panel.fit(body, title="[bold medium_purple1]Focus Guardian AI v0.1[/]", border_style="medium_purple1"))
 
     def render_dashboard(self, session, events, context=None, message: str | None = None) -> None:
         """Clear + show the full dashboard; optionally append an agent message."""
@@ -72,7 +72,7 @@ class UI:
 
         if session is None:
             self.console.print(Panel.fit(
-                'No active session. Type [cyan]/start "goal" <minutes>[/cyan] to begin.',
+                'No active session. Type [medium_purple1]/start "goal" <minutes>[/medium_purple1] to begin.',
                 border_style="dim",
             ))
         else:
@@ -113,8 +113,8 @@ class UI:
     def render_help(self) -> None:
         self.console.clear()
         self._print_header()
-        table = Table(title="Commands", header_style="bold cyan", border_style="dim")
-        table.add_column("Command", style="cyan", no_wrap=True)
+        table = Table(title="Commands", header_style="bold medium_purple1", border_style="dim")
+        table.add_column("Command", style="medium_purple1", no_wrap=True)
         table.add_column("Description")
         rows = [
             ('/start "goal" <min>', "Begin a focus session"),
@@ -133,7 +133,7 @@ class UI:
     # --- inline messages (no clear — layer on last screen) ---
 
     def info(self, message: str) -> None:
-        self.console.print(f"[cyan]i[/cyan] {message}")
+        self.console.print(f"[medium_purple1]i[/medium_purple1] {message}")
 
     def warn(self, message: str) -> None:
         self.console.print(f"[yellow]![/yellow] {message}")
@@ -148,7 +148,7 @@ class UI:
     # --- internals ---
 
     def _print_header(self) -> None:
-        self.console.print("[bold cyan]Focus Guardian AI[/bold cyan] [dim]v0.1[/dim]")
+        self.console.print("[bold medium_purple1]Focus Guardian AI[/bold medium_purple1] [dim]v0.1[/dim]")
         self.console.print()
 
     def _render_event_feed(self, events, limit: int = _EVENT_FEED_LIMIT) -> None:
