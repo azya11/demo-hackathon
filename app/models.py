@@ -21,6 +21,7 @@ class EventType(str, Enum):
     WARNING_ISSUED = "warning_issued"
     TAB_CLOSED = "tab_closed"
     AI_CLASSIFIED = "ai_classified"
+    MODE_CHANGED = "mode_changed"
 
 
 @dataclass

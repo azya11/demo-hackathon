@@ -54,6 +54,7 @@ class Orchestrator:
         self._require_session()
         assert self.session is not None
         self.session.mode = mode
+        self._log(EventType.MODE_CHANGED, reason=f"mode set to {mode.value}")
 
     # --- state queries ---
 
