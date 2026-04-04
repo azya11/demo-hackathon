@@ -59,7 +59,8 @@ class CLI:
         self.orchestrator = orchestrator
         self.ui = ui
         self._running = False
-        self._session = PromptSession(completer=_SlashCompleter(), complete_while_typing=True)
+        import sys
+        self._session = PromptSession(completer=_SlashCompleter(), complete_while_typing=True) if sys.stdin.isatty() else None
         self._handlers = {
             "start": self._handle_start,
             "stop": self._handle_stop,
@@ -78,7 +79,7 @@ class CLI:
         self._running = True
         while self._running:
             try:
-                line = self._session.prompt(self.PROMPT).strip()
+                line = self._session.prompt(self.PROMPT).strip() if self._session else input(self.PROMPT).strip()
             except (EOFError, KeyboardInterrupt):
                 self.ui.info("bye")
                 break
