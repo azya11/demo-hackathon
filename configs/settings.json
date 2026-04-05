@@ -1,5 +1,5 @@
 {
-  "default_mode": "chill",
+  "default_mode": "normal",
   "tick_seconds": 2.0,
   "warn_before_close_seconds": 3,
   "normal_mode_grace_minutes": 2.0,
@@ -20,5 +20,7 @@
   "storage": {
     "db_path": "data/sessions.db"
   },
-  "theme": "Sakura Dream"
+  "theme": "Sakura Dream",
+  "coach_enabled": true,
+  "coach_interval_minutes": 2
 }

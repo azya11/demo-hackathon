@@ -146,6 +146,11 @@ class Orchestrator:
         self._tabs_restored = False
         self._last_tabs_save_tick = -1
         self.dev_tracker = DevTracker()
+        # Focus coach settings
+        self.coach_enabled: bool = True
+        self.coach_interval_minutes: int = 10
+        self._last_coach_time: float = 0.0
+        self._coach_lock = threading.Lock()
 
     # --- session lifecycle ---
 
@@ -174,6 +179,8 @@ class Orchestrator:
         self._stop_tick_loop()
         self.session.stop()
         self._log(EventType.SESSION_STOPPED)
+        if self.coach_enabled:
+            self.trigger_coach_review(is_final=True)
         return self.session
 
     def pause_session(self) -> None:
@@ -258,6 +265,8 @@ class Orchestrator:
         data["normal_mode_grace_minutes"] = round(self.grace_seconds / 60, 2)
         import app.themes as _themes
         data["theme"] = _themes.current.name
+        data["coach_enabled"] = self.coach_enabled
+        data["coach_interval_minutes"] = self.coach_interval_minutes
         self._atomic_write(path, json.dumps(data, indent=2) + "\n")
 
     def _save_sites(self) -> None:
@@ -482,11 +491,19 @@ class Orchestrator:
                 self.ui.warn(f"tab restore failed: {e}")
             self._tabs_restored = True
 
+        self._last_coach_time = time.time()
         while not self._stop_flag.is_set():
             try:
                 self._tick()
             except Exception as e:
                 self.ui.error(f"tick error: {e}")
+            # Periodic focus coach check-in.
+            if self.coach_enabled and self.ai is not None and self.ai.enabled:
+                now = time.time()
+                interval_secs = self.coach_interval_minutes * 60
+                if now - self._last_coach_time >= interval_secs:
+                    self._last_coach_time = now
+                    self.trigger_coach_review(is_final=False)
             # Throttled snapshot of open tabs — roughly every ~10s.
             self._tick_count += 1
             save_every = max(1, int(10 / max(self.tick_seconds, 0.5)))
@@ -606,6 +623,101 @@ class Orchestrator:
                 continue
             for match in procs:
                 self.tools.apply_process(match, session, reason=ai_decision.reason)
+
+    # --- focus coach ---
+
+    def _build_events_summary(self, session: Session) -> str:
+        """Summarise the session event log into a short human-readable string."""
+        from app.models import EventType
+        from datetime import datetime
+        if not self.events:
+            return "no events recorded"
+        lines: list[str] = []
+        domain_counts: dict[str, int] = {}
+        blocked_counts: dict[str, int] = {}
+        for ev in self.events:
+            if ev.session_id != session.id:
+                continue
+            if ev.type == EventType.TAB_OBSERVED and ev.domain:
+                domain_counts[ev.domain] = domain_counts.get(ev.domain, 0) + 1
+            elif ev.type in (EventType.WARNING_ISSUED, EventType.TAB_CLOSED) and ev.domain:
+                blocked_counts[ev.domain] = blocked_counts.get(ev.domain, 0) + 1
+            elif ev.type == EventType.SESSION_PAUSED:
+                ts = ev.created_at.strftime("%H:%M") if ev.created_at else "?"
+                lines.append(f"paused at {ts}")
+            elif ev.type == EventType.SESSION_RESUMED:
+                ts = ev.created_at.strftime("%H:%M") if ev.created_at else "?"
+                lines.append(f"resumed at {ts}")
+        if domain_counts:
+            top = sorted(domain_counts, key=lambda d: -domain_counts[d])[:6]
+            lines.append(f"sites visited: {', '.join(top)}")
+        if blocked_counts:
+            details = ", ".join(f"{d} (×{n})" for d, n in sorted(blocked_counts.items(), key=lambda x: -x[1]))
+            lines.append(f"blocked sites triggered: {details}")
+        if session.offense_count:
+            lines.append(f"total offenses: {session.offense_count}")
+        return "\n".join(lines) if lines else "session ran without notable events"
+
+    def _run_coach_review(self, session: Session, is_final: bool = False) -> None:
+        """Call Gemini for a coaching review and display it. Runs in its own thread."""
+        if self.ai is None or not self.ai.enabled:
+            return
+        if not self._coach_lock.acquire(blocking=False):
+            return  # another review is already running
+        try:
+            from datetime import datetime
+            started = session.started_at
+            ended = session.ended_at or datetime.now()
+            if started is None:
+                return
+            elapsed_secs = max((ended - started - session.paused_duration).total_seconds(), 0)
+            elapsed_min = elapsed_secs / 60
+            duration_min = session.duration.total_seconds() / 60
+
+            blocked_domains = list({
+                ev.domain for ev in self.events
+                if ev.session_id == session.id
+                and ev.domain
+                and ev.type.value in ("warning_issued", "tab_closed")
+            })
+
+            summary = self._build_events_summary(session)
+            label = "final session review" if is_final else "mid-session check-in"
+
+            text = self.ai.focus_coach_review(
+                goal=session.goal,
+                mode=session.mode.value,
+                duration_minutes=int(duration_min),
+                elapsed_minutes=elapsed_min,
+                offenses=session.offense_count,
+                blocked_domains=blocked_domains,
+                events_summary=summary,
+                is_final=is_final,
+            )
+            if text:
+                self.ui.info(f"[coach] {label} ready")
+                self.ui.render_coach_panel(text, label=label)
+            else:
+                err = getattr(self.ai, "_last_error", "") or ""
+                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                    # Rate-limited — quietly push the next check-in back
+                    self._last_coach_time = time.time()
+                elif err:
+                    self.ui.warn(f"[coach] skipped — {err[:80]}")
+        finally:
+            self._coach_lock.release()
+
+    def trigger_coach_review(self, is_final: bool = False) -> None:
+        """Spawn a background thread to run the coach review."""
+        session = self.session
+        if session is None:
+            return
+        t = threading.Thread(
+            target=self._run_coach_review,
+            args=(session, is_final),
+            daemon=True,
+        )
+        t.start()
 
     # --- internals ---
 
