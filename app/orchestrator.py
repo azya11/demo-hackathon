@@ -642,7 +642,6 @@ class Orchestrator:
 
             summary = self._build_events_summary(session)
             label = "final session review" if is_final else "mid-session check-in"
-            self.ui.info(f"[coach] generating {label}…")
 
             text = self.ai.focus_coach_review(
                 goal=session.goal,
@@ -655,9 +654,15 @@ class Orchestrator:
                 is_final=is_final,
             )
             if text:
+                self.ui.info(f"[coach] {label} ready")
                 self.ui.render_coach_panel(text, label=label)
             else:
-                self.ui.warn("[coach] no response from AI")
+                err = getattr(self.ai, "_last_error", "") or ""
+                if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                    # Rate-limited — quietly push the next check-in back
+                    self._last_coach_time = time.time()
+                elif err:
+                    self.ui.warn(f"[coach] skipped — {err[:80]}")
         finally:
             self._coach_lock.release()
 
