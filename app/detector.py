@@ -143,6 +143,41 @@ class Detector:
             ))
         return out
 
+    def open_tab(self, url: str) -> bool:
+        """Open a new tab pointed at `url`. Works in both attach and launch modes."""
+        if not url:
+            return False
+        if self._mode == "attach":
+            if not self._cdp_url:
+                return False
+            from urllib.parse import quote
+            endpoint = self._cdp_url + f"/json/new?{quote(url, safe=':/?&=#%')}"
+            # Chrome 107+ rejects /json/new unless the Host header is an IP
+            # or "localhost", and requires --remote-allow-origins=*.
+            for method in ("PUT", "POST"):
+                try:
+                    req = urllib.request.Request(endpoint, method=method)
+                    req.add_header("Host", "localhost")
+                    with urllib.request.urlopen(req, timeout=3) as r:
+                        _ = r.read()
+                    return True
+                except Exception:
+                    continue
+            return False
+        if self._mode == "launch":
+            if self._context is None:
+                return False
+            try:
+                page = self._context.new_page()
+                try:
+                    page.goto(url, timeout=5000)
+                except Exception:
+                    pass
+                return True
+            except Exception:
+                return False
+        return False
+
     def close_tab_cdp(self, target_id: str) -> bool:
         """Close a tab via CDP HTTP endpoint."""
         if not target_id or not self._cdp_url:
