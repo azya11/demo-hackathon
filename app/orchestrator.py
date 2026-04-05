@@ -62,8 +62,12 @@ def _port_open(cdp_url: str, timeout: float = 0.5) -> bool:
         return False
 
 
-def _spawn_chrome_with_debug(cdp_url: str, ui) -> subprocess.Popen | None:
-    """Launch Chrome/Edge with --remote-debugging-port. Returns the process or None."""
+def _spawn_chrome_with_debug(cdp_url: str, ui, restore_urls: list[str] | None = None) -> subprocess.Popen | None:
+    """Launch Chrome/Edge with --remote-debugging-port. Returns the process or None.
+
+    If `restore_urls` is provided, each URL is appended as a positional arg so
+    Chrome opens them as tabs on startup (reliable path — avoids /json/new,
+    which newer Chrome rejects for DNS-rebinding protection)."""
     exe = _find_browser_executable()
     if not exe:
         ui.error("could not find Chrome — install Chrome or start it manually")
@@ -75,10 +79,13 @@ def _spawn_chrome_with_debug(cdp_url: str, ui) -> subprocess.Popen | None:
     args = [
         exe,
         f"--remote-debugging-port={port}",
+        "--remote-allow-origins=*",
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
     ]
+    if restore_urls:
+        args.extend(restore_urls)
     try:
         proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
@@ -135,6 +142,8 @@ class Orchestrator:
         self._chrome_process: subprocess.Popen | None = None
         self._tick_count = 0
         self._ai_circuit_notified = False
+        self._tabs_restored = False
+        self._last_tabs_save_tick = -1
 
     # --- session lifecycle ---
 
@@ -270,6 +279,79 @@ class Orchestrator:
             json.dumps(data, indent=2) + "\n",
         )
 
+    def _tabs_file(self):
+        if self.configs_dir is None:
+            return None
+        return self.configs_dir / "last_tabs.json"
+
+    def _save_open_tabs(self) -> None:
+        """Persist the currently open tab URLs to configs/last_tabs.json."""
+        path = self._tabs_file()
+        if path is None or self.detector is None:
+            return
+        try:
+            tabs = self.detector.list_tabs()
+        except Exception:
+            return
+        urls: list[str] = []
+        seen: set[str] = set()
+        for ctx in tabs:
+            u = (ctx.url or "").strip()
+            if not u or u in seen:
+                continue
+            if u.startswith(("about:", "chrome://", "edge://", "devtools://", "chrome-extension://")):
+                continue
+            seen.add(u)
+            urls.append(u)
+        self._atomic_write(path, json.dumps({"tabs": urls}, indent=2) + "\n")
+
+    def _load_saved_tab_urls(self) -> list[str]:
+        """Read URLs from configs/last_tabs.json, de-duped and filtered."""
+        path = self._tabs_file()
+        if path is None or not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        urls = data.get("tabs") or []
+        out: list[str] = []
+        seen: set[str] = set()
+        for u in urls:
+            u = (u or "").strip()
+            if not u or u in seen:
+                continue
+            if u.startswith(("about:", "chrome://", "edge://", "devtools://", "chrome-extension://")):
+                continue
+            seen.add(u)
+            out.append(u)
+        return out
+
+    def _restore_open_tabs(self) -> None:
+        """Reopen tabs saved from the previous run. Skips URLs already open."""
+        path = self._tabs_file()
+        if path is None or self.detector is None or not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        urls = data.get("tabs") or []
+        if not urls:
+            return
+        try:
+            already = {(ctx.url or "").strip() for ctx in self.detector.list_tabs()}
+        except Exception:
+            already = set()
+        opened = 0
+        for url in urls:
+            if not url or url in already:
+                continue
+            if self.detector.open_tab(url):
+                opened += 1
+        if opened:
+            self.ui.info(f"restored {opened} tab(s) from last session")
+
     @staticmethod
     def _atomic_write(path, content: str) -> None:
         try:
@@ -314,9 +396,14 @@ class Orchestrator:
             if self.browser_mode == "attach":
                 if not _port_open(self.cdp_url):
                     self.ui.info("no Chrome debug port detected — starting Chrome with debug flag")
-                    spawned = _spawn_chrome_with_debug(self.cdp_url, self.ui)
+                    saved_urls = self._load_saved_tab_urls()
+                    spawned = _spawn_chrome_with_debug(self.cdp_url, self.ui, restore_urls=saved_urls)
                     if spawned:
                         self._chrome_process = spawned
+                    if saved_urls:
+                        self.ui.info(f"restoring {len(saved_urls)} tab(s) from last session")
+                    # Chrome opens the URLs on spawn, so mark restore as done.
+                    self._tabs_restored = True
                 self.detector.attach(self.cdp_url)
                 self._browser_launched = True
                 self.ui.info(f"attached to Chrome at {self.cdp_url} — monitoring all your tabs")
@@ -349,12 +436,35 @@ class Orchestrator:
                 self.ui.error("run: playwright install chromium")
             return
 
+        # Restore tabs from the previous session, once per tick-loop start.
+        if not self._tabs_restored:
+            try:
+                self._restore_open_tabs()
+            except Exception as e:
+                self.ui.warn(f"tab restore failed: {e}")
+            self._tabs_restored = True
+
         while not self._stop_flag.is_set():
             try:
                 self._tick()
             except Exception as e:
                 self.ui.error(f"tick error: {e}")
+            # Throttled snapshot of open tabs — roughly every ~10s.
+            self._tick_count += 1
+            save_every = max(1, int(10 / max(self.tick_seconds, 0.5)))
+            if self._tick_count - self._last_tabs_save_tick >= save_every:
+                try:
+                    self._save_open_tabs()
+                    self._last_tabs_save_tick = self._tick_count
+                except Exception:
+                    pass
             self._stop_flag.wait(self.tick_seconds)
+
+        # Final save on loop exit so the freshest state is persisted.
+        try:
+            self._save_open_tabs()
+        except Exception:
+            pass
 
     def _tick(self) -> None:
         session = self.session
