@@ -17,9 +17,12 @@ Commands:
 from __future__ import annotations
 
 import shlex
+import threading
+import time as _time
 from dataclasses import dataclass
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import get_app
 from prompt_toolkit.completion import Completer, Completion
 
 from app.session import SessionMode
@@ -61,6 +64,7 @@ class CLI:
         self._running = False
         import sys
         self._session = PromptSession(completer=_SlashCompleter(), complete_while_typing=True) if sys.stdin.isatty() else None
+        self._start_ticker()
         self._handlers = {
             "start": self._handle_start,
             "stop": self._handle_stop,
@@ -79,7 +83,7 @@ class CLI:
         self._running = True
         while self._running:
             try:
-                line = self._session.prompt(self.PROMPT).strip() if self._session else input(self.PROMPT).strip()
+                line = self._session.prompt(self.PROMPT, bottom_toolbar=self._toolbar).strip() if self._session else input(self.PROMPT).strip()
             except (EOFError, KeyboardInterrupt):
                 self.ui.info("bye")
                 break
@@ -125,7 +129,7 @@ class CLI:
             raise ValueError("minutes must be positive")
         mode = self._parse_mode(parts[2]) if len(parts) > 2 else SessionMode.STRICT
         self.orchestrator.start_session(goal, minutes, mode)
-        self._refresh(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
+        self.ui.agent_say(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
 
     def _handle_stop(self, args: str) -> None:
         session = self.orchestrator.stop_session()
@@ -155,6 +159,32 @@ class CLI:
         self._running = False
 
     # --- helpers ---
+
+    def _start_ticker(self) -> None:
+        """Background thread that forces the toolbar to repaint every second."""
+        def _tick():
+            while True:
+                _time.sleep(1)
+                try:
+                    get_app().invalidate()
+                except Exception:
+                    pass
+        t = threading.Thread(target=_tick, daemon=True)
+        t.start()
+
+    def _toolbar(self) -> str:
+        s = self.orchestrator.session
+        if s is None or s.status.value in ("stopped", "completed"):
+            return " Focus Guardian  ·  No active session  ·  /start \"goal\" <minutes> to begin"
+        total = max(int(s.time_remaining().total_seconds()), 0)
+        h, rem = divmod(total, 3600)
+        m, sec = divmod(rem, 60)
+        time_str = f"{h:02d}:{m:02d}:{sec:02d}"
+        status = s.status.value.upper()
+        return (
+            f" Focus Guardian  ·  {status}  ·  {s.goal}\n"
+            f" Time left: {time_str}  ·  Mode: {s.mode.value}  ·  Offenses: {s.offense_count}"
+        )
 
     def _refresh(self, message: str | None = None) -> None:
         """Redraw the dashboard (clears previous frame)."""
