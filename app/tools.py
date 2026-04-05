@@ -13,10 +13,11 @@ from app.policy import Action
 class Tools:
     """The agent's action surface."""
 
-    def __init__(self, ui, event_log: list, detector=None) -> None:
+    def __init__(self, ui, event_log: list, detector=None, process_monitor=None) -> None:
         self.ui = ui
         self.events = event_log
         self.detector = detector
+        self.process_monitor = process_monitor
 
     # --- primary actions ---
 
@@ -64,6 +65,45 @@ class Tools:
             reason=reason,
         )
         return True
+
+    def kill_process(self, proc_info, session_id: int, reason: str) -> bool:
+        """Terminate a blocked process. Returns success."""
+        if self.process_monitor is None:
+            return False
+        ok = self.process_monitor.kill(proc_info.pid)
+        if not ok:
+            return False
+        self.ui.warn(f"[focus] killed {proc_info.name} (pid {proc_info.pid}) — {reason}")
+        self._log(
+            EventType.PROCESS_KILLED, session_id,
+            domain=proc_info.name,
+            action=Action.BLOCK.value, reason=reason,
+        )
+        return True
+
+    def warn_process(self, proc_info, session_id: int, reason: str) -> None:
+        """Soft-mode notification about a running blocked process."""
+        self.ui.warn(f"[focus] {proc_info.name} is running — {reason}")
+        self._log(
+            EventType.WARNING_ISSUED, session_id,
+            domain=proc_info.name, reason=reason,
+        )
+
+    def apply_process(self, proc_info, session) -> None:
+        """Run the blocked-process action for the current mode, with dedup."""
+        from app.session import SessionMode
+        key_id = f"pid:{proc_info.pid}"
+        is_new = session.should_count_offense(key_id, proc_info.name)
+        reason = f"{proc_info.name} is blocked ({session.mode.value})"
+        if session.mode == SessionMode.STRICT:
+            if is_new:
+                session.record_offense()
+            self.kill_process(proc_info, session.id, reason)
+            return
+        # soft mode
+        if is_new:
+            session.record_offense()
+            self.warn_process(proc_info, session.id, reason)
 
     # --- dispatcher ---
 

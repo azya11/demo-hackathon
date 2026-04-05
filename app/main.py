@@ -16,6 +16,7 @@ from app.cli import CLI
 from app.detector import Detector
 from app.orchestrator import Orchestrator
 from app.policy import Policy
+from app.process_monitor import ProcessMonitor
 from app.tools import Tools
 from app.ui import UI
 
@@ -28,7 +29,7 @@ def _find_service_account(configs_dir: Path) -> Path | None:
     if not configs_dir.exists():
         return None
     for p in configs_dir.glob("*.json"):
-        if p.name in ("settings.json", "blocked_sites.json"):
+        if p.name in ("settings.json", "blocked_sites.json", "blocked_processes.json"):
             continue
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -49,12 +50,19 @@ def _load_json(path: Path, default: dict) -> dict:
 def main() -> None:
     settings = _load_json(ROOT / "configs" / "settings.json", {})
     sites = _load_json(ROOT / "configs" / "blocked_sites.json", {"blocklist": [], "allowlist": []})
+    procs = _load_json(ROOT / "configs" / "blocked_processes.json", {"blocklist": [], "allowlist": []})
 
     ui = UI()
     policy = Policy(blocklist=sites.get("blocklist", []), allowlist=sites.get("allowlist", []))
+    process_monitor = ProcessMonitor(
+        blocklist=procs.get("blocklist", []),
+        allowlist=procs.get("allowlist", []),
+    )
+    if not process_monitor.available:
+        ui.warn("process monitor disabled (psutil not installed)")
     detector = Detector()
     events: list = []
-    tools = Tools(ui=ui, event_log=events, detector=detector)
+    tools = Tools(ui=ui, event_log=events, detector=detector, process_monitor=process_monitor)
 
     ai_cfg = settings.get("ai", {})
     ai = None
@@ -86,6 +94,7 @@ def main() -> None:
         browser_headless=bool(browser_cfg.get("headless", False)),
         browser_mode=browser_cfg.get("mode", "launch"),
         cdp_url=browser_cfg.get("cdp_url", "http://localhost:9222"),
+        process_monitor=process_monitor,
     )
     # Share the orchestrator's event log with tools so warn/close events land there.
     orchestrator.events = events
