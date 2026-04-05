@@ -60,6 +60,14 @@ def main() -> None:
     sites = _load_json(ROOT / "configs" / "blocked_sites.json", {"blocklist": [], "allowlist": []})
     procs = _load_json(ROOT / "configs" / "blocked_processes.json", {"blocklist": [], "allowlist": []})
 
+    # Restore saved theme
+    import app.themes as _themes
+    saved_theme = settings.get("theme")
+    if saved_theme:
+        match = next((t for t in _themes.THEMES if t.name == saved_theme), None)
+        if match:
+            _themes.current = match
+
     ui = UI()
     policy = Policy(blocklist=sites.get("blocklist", []), allowlist=sites.get("allowlist", []))
     process_monitor = ProcessMonitor(
