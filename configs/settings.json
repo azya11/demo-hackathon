@@ -1,5 +1,5 @@
 {
-  "default_mode": "hardcore",
+  "default_mode": "chill",
   "tick_seconds": 2.0,
   "warn_before_close_seconds": 3,
   "normal_mode_grace_minutes": 2.0,

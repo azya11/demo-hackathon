@@ -48,6 +48,8 @@ class Session:
         self._counted_offenses: set[tuple[str, str]] = set()
         # Normal-mode grace tracking: first time we saw a blocked name.
         self.grace_first_seen: dict[str, datetime] = {}
+        # Domains/processes that already received the "1 minute left" popup in normal mode.
+        self.grace_warned_1min: set[str] = set()
         # Chill-mode monitoring: cumulative time each procrastination name appeared.
         self.chill_last_seen: dict[str, datetime] = {}
         self.chill_time: dict[str, timedelta] = {}

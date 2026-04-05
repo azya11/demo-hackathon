@@ -30,6 +30,16 @@ def _spawn_popup(message: str) -> None:
                 cwd=str(_ROOT),
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
+        elif sys.platform == "darwin":
+            # Escape single quotes in message for the AppleScript string literal.
+            safe_msg = message.replace("'", "\\'")
+            script = (
+                f"tell application \"Terminal\"\n"
+                f"  activate\n"
+                f"  do script \"cd '{_ROOT}' && '{python}' -m app.popup '{safe_msg}'\"\n"
+                f"end tell"
+            )
+            subprocess.Popen(["osascript", "-e", script])
         else:
             for term in ("gnome-terminal", "xterm", "konsole"):
                 try:
@@ -154,9 +164,19 @@ class Tools:
                     f"{reason} — closing in {window} unless you quit it",
                 )
                 return
-            if (now - first).total_seconds() >= session.grace_seconds:
+            elapsed = (now - first).total_seconds()
+            if elapsed >= session.grace_seconds:
                 self.kill_process(proc_info, session.id, f"{reason} — grace expired")
                 session.grace_first_seen.pop(proc_info.name, None)
+                session.grace_warned_1min.discard(proc_info.name)
+                return
+            remaining = session.grace_seconds - elapsed
+            if remaining <= 60 and proc_info.name not in session.grace_warned_1min:
+                session.grace_warned_1min.add(proc_info.name)
+                self.warn_process(
+                    proc_info, session.id,
+                    f"less than a minute before it gets closed!",
+                )
             return
         # chill mode: monitor cumulative time, warn once
         now = datetime.now()
@@ -209,14 +229,25 @@ class Tools:
                     grace_min = max(session.grace_seconds // 60, 0)
                     grace_sec = session.grace_seconds % 60
                     window = f"{grace_min}m{grace_sec}s" if grace_sec else f"{grace_min}m"
+                    # Terminal log only — popup fires at the 1-minute mark instead.
+                    self.ui.warn(f"[focus] {decision.reason} — closing in {window} unless you leave")
+                    self._log(EventType.WARNING_ISSUED, session.id, url=context.url, domain=context.domain,
+                              reason=f"{decision.reason} — closing in {window}")
+                    return
+                elapsed = (now - first).total_seconds()
+                if elapsed >= session.grace_seconds:
+                    ok = self.close_tab(context, session.id, f"{decision.reason} — grace expired")
+                    if ok:
+                        session.grace_first_seen.pop(context.domain, None)
+                        session.grace_warned_1min.discard(context.domain)
+                    return
+                remaining = session.grace_seconds - elapsed
+                if remaining <= 60 and context.domain not in session.grace_warned_1min:
+                    session.grace_warned_1min.add(context.domain)
                     self.warn_user(
-                        f"{decision.reason} — closing in {window} unless you leave",
+                        f"{context.domain} — less than a minute before it gets closed!",
                         session.id, context.url, context.domain,
                     )
-                    return
-                if (now - first).total_seconds() >= session.grace_seconds:
-                    self.close_tab(context, session.id, f"{decision.reason} — grace expired")
-                    session.grace_first_seen.pop(context.domain, None)
                 return
             if is_new:
                 session.record_offense()
