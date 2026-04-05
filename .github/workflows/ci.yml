@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile check
+        run: python -m compileall app scripts
+
+      - name: Smoke test CLI
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          printf '/help\n/status\n/start "Study OS" 2\n/status\n/pause\n/resume\n/mode soft\n/stop\n/quit\n' | python -m app.main
