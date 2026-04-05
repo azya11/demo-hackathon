@@ -97,6 +97,7 @@ class Orchestrator:
         browser_headless: bool = False,
         browser_mode: str = "launch",
         cdp_url: str = "http://localhost:9222",
+        process_monitor=None,
     ) -> None:
         self.ui = ui
         self.policy = policy
@@ -108,6 +109,7 @@ class Orchestrator:
         self.browser_headless = browser_headless
         self.browser_mode = browser_mode
         self.cdp_url = cdp_url
+        self.process_monitor = process_monitor
         self.session: Session | None = None
         self.events: list[Event] = []
         self._thread: threading.Thread | None = None
@@ -165,6 +167,20 @@ class Orchestrator:
         self._log(EventType.MODE_CHANGED, reason=f"allowed {d}")
         return d
 
+    def add_process_block(self, name: str) -> str:
+        if self.process_monitor is None:
+            raise RuntimeError("process monitor not available (install psutil)")
+        n = self.process_monitor.add_block(name)
+        self._log(EventType.MODE_CHANGED, reason=f"p-blocked {n}")
+        return n
+
+    def add_process_allow(self, name: str) -> str:
+        if self.process_monitor is None:
+            raise RuntimeError("process monitor not available (install psutil)")
+        n = self.process_monitor.add_allow(name)
+        self._log(EventType.MODE_CHANGED, reason=f"p-allowed {n}")
+        return n
+
     # --- state queries ---
 
     def recent_events(self, limit: int = 20) -> list[Event]:
@@ -173,7 +189,9 @@ class Orchestrator:
     # --- tick loop ---
 
     def _start_tick_loop(self) -> None:
-        if self.detector is None or self.tools is None:
+        if self.tools is None:
+            return
+        if self.detector is None and self.process_monitor is None:
             return
         self._stop_flag.clear()
         self._tick_count = 0
@@ -231,12 +249,13 @@ class Orchestrator:
         session = self.session
         if session is None or session.status != SessionStatus.ACTIVE:
             return
-        alive = self.detector.is_alive()
+        # Process scan first — fast, local, no network.
+        if self.process_monitor is not None and self.process_monitor.available:
+            for proc in self.process_monitor.scan_blocked():
+                self.tools.apply_process(proc, session)
+        if self.detector is None:
+            return
         tabs = self.detector.list_tabs()
-        if self._tick_count < 3:
-            self.ui.info(f"tick#{self._tick_count}: alive={alive} tabs={len(tabs)} " +
-                         "[" + ", ".join(f"{t.domain}" for t in tabs if t.domain) + "]")
-        self._tick_count += 1
         for ctx in tabs:
             if ctx.domain:
                 self._log(EventType.TAB_OBSERVED, url=ctx.url, domain=ctx.domain)
