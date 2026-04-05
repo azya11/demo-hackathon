@@ -17,6 +17,7 @@ Commands:
 
 from __future__ import annotations
 
+import os
 import shlex
 import threading
 import time as _time
@@ -83,17 +84,23 @@ _MODE_ARGS = ["strict", "soft"]
 _ALERT_THRESHOLDS = [60, 30, 10, 5, 1]  # minutes
 
 _COMMAND_META = {
-    "start":  "begin a focus session  /start \"goal\" <min>",
-    "stop":   "end current session",
-    "status": "show current session state",
-    "pause":  "pause session timer",
-    "resume": "resume after pause",
-    "mode":   "switch enforcement mode  strict|soft",
-    "time":   "adjust time  +20 | -10 | 45",
-    "help":   "show all commands",
-    "clear":  "clear the screen",
-    "quit":   "exit app",
-    "exit":   "exit app",
+    "start":   "begin a focus session  /start \"goal\" <min>",
+    "stop":    "end current session",
+    "status":  "show current session state",
+    "pause":   "pause session timer",
+    "resume":  "resume after pause",
+    "mode":    "switch enforcement mode  strict|soft",
+    "time":    "adjust time  +20 | -10 | 45",
+    "block":   "block a site  /block twitter.com",
+    "allow":   "allow a site  /allow twitter.com",
+    "blocks":  "show blocked/allowed sites",
+    "pblock":  "block a process  /pblock spotify.exe",
+    "pallow":  "allow a process  /pallow spotify.exe",
+    "pblocks": "show blocked/allowed processes",
+    "help":    "show all commands",
+    "clear":   "clear the screen",
+    "quit":    "exit app",
+    "exit":    "exit app",
 }
 
 _MODE_META = {
@@ -398,12 +405,9 @@ class CLI:
 
         if s is None or s.status.value in ("stopped", "completed"):
             return FormattedText([
-                ("fg:#cba6f7",  "  ◆  Focus Guardian"),
-                (DIM,           "  ─────────────────────────────────────────────"),
-                ("",            "\n"),
-                (DIM,           "  no active session  ·  "),
-                (MED,           '/start "goal" <minutes>'),
-                (DIM,           "  to begin"),
+                ("fg:#cba6f7", "  * Focus Guardian"),
+                (DIM,          "  |  no active session  |  "),
+                (MED,          '/start "goal" <minutes>  to begin'),
             ])
 
         # time remaining
@@ -424,11 +428,11 @@ class CLI:
         else:
             elapsed_str = "00:00:00"
 
-        # progress bar (24 wide)
+        # progress bar (ASCII only — block chars have ambiguous display width)
         dur  = max(s.duration.total_seconds(), 1)
         frac = max(0.0, min(1.0, total_secs / dur))
-        filled = round(frac * 24)
-        bar = "█" * filled + "░" * (24 - filled)
+        filled = round(frac * 20)
+        bar = "#" * filled + "-" * (20 - filled)
         if frac > 0.5:
             bar_color = "fg:#a6e3a1"
         elif frac > 0.25:
@@ -436,33 +440,28 @@ class CLI:
         else:
             bar_color = "fg:#f38ba8"
 
-        icons  = {"active": "▶", "paused": "⏸", "stopped": "■", "completed": "✓", "idle": "◌"}
         colors = {"active": "fg:#a6e3a1", "paused": "fg:#f9e2af", "stopped": "fg:#f38ba8", "completed": "fg:#89b4fa", "idle": "fg:#585b70"}
-        icon     = icons.get(s.status.value, "·")
-        st_color = colors.get(s.status.value, "fg:#cdd6f4")
+        st_color   = colors.get(s.status.value, "fg:#cdd6f4")
         mode_color = "fg:#f38ba8" if s.mode.value == "strict" else "fg:#94e2d5"
         off_color  = "fg:#a6e3a1" if s.offense_count == 0 else ("fg:#f9e2af" if s.offense_count < 3 else "fg:#f38ba8")
-        goal = s.goal if len(s.goal) <= 36 else s.goal[:34] + "…"
+        goal = s.goal if len(s.goal) <= 28 else s.goal[:26] + "..."
+        pct  = f"{int(frac * 100):3d}%"
 
         return FormattedText([
-            # ── line 1 ──────────────────────────────────────────
-            ("fg:#cba6f7",  "  ◆  Focus Guardian"),
-            (DIM,           "  │  "),
-            (st_color,      f"{icon}  {s.status.value.upper()}"),
-            (DIM,           "  │  "),
-            ("fg:#cdd6f4",  f'"{goal}"'),
-            (DIM,           "  │  "),
-            (mode_color,    s.mode.value),
-            (DIM,           "  │  "),
-            (off_color,     f"⚠  {s.offense_count} offense{'s' if s.offense_count != 1 else ''}"),
-            ("",            "\n"),
-            # ── line 2 ──────────────────────────────────────────
-            (DIM,           "  "),
-            (bar_color,     bar),
-            (DIM,           f"  {int(frac * 100):3d}%  │  "),
-            ("fg:#94e2d5",  f"⏱  {time_str} left"),
-            (DIM,           "  │  elapsed  "),
-            (MED,           elapsed_str),
+            ("fg:#cba6f7", "  * "),
+            (st_color,     s.status.value.upper()),
+            (DIM,          "  |  "),
+            ("fg:#cdd6f4", f'"{goal}"'),
+            (DIM,          "  |  ["),
+            (bar_color,    bar),
+            (DIM,          f"] {pct}  |  "),
+            ("fg:#94e2d5", f"{time_str} left"),
+            (DIM,          "  |  elapsed "),
+            (MED,          elapsed_str),
+            (DIM,          "  |  "),
+            (mode_color,   s.mode.value),
+            (DIM,          "  |  "),
+            (off_color,    f"! {s.offense_count}"),
         ])
 
     def _refresh(self, message: str | None = None) -> None:

@@ -21,11 +21,20 @@ from app.session import Session, SessionMode, SessionStatus
 
 
 _CHROME_PATHS = [
+    # macOS
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    # Windows
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
     os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    # Linux
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
 ]
 
 
@@ -34,7 +43,7 @@ def _find_browser_executable() -> str | None:
         if p and os.path.exists(p):
             return p
     # PATH lookup as fallback.
-    for name in ("chrome", "chrome.exe", "msedge", "msedge.exe"):
+    for name in ("google-chrome", "chromium-browser", "chromium", "chrome", "chrome.exe", "msedge", "msedge.exe"):
         found = shutil.which(name)
         if found:
             return found
@@ -56,11 +65,12 @@ def _spawn_chrome_with_debug(cdp_url: str, ui) -> subprocess.Popen | None:
     """Launch Chrome/Edge with --remote-debugging-port. Returns the process or None."""
     exe = _find_browser_executable()
     if not exe:
-        ui.error("could not find chrome.exe or msedge.exe — install Chrome or start it manually")
+        ui.error("could not find Chrome — install Chrome or start it manually")
         return None
     parsed = urlparse(cdp_url)
     port = parsed.port or 9222
-    profile_dir = os.path.join(os.environ.get("TEMP", os.getcwd()), "chrome-focus")
+    tmp = os.environ.get("TEMP") or os.environ.get("TMPDIR") or os.getcwd()
+    profile_dir = os.path.join(tmp, "chrome-focus")
     args = [
         exe,
         f"--remote-debugging-port={port}",
@@ -236,10 +246,23 @@ class Orchestrator:
             msg = str(e)
             self.ui.error(f"browser setup failed: {msg}")
             if self.browser_mode == "attach":
-                self.ui.error(
-                    'start Chrome with: chrome.exe --remote-debugging-port=9222 '
-                    '--user-data-dir="%TEMP%\\chrome-focus"'
-                )
+                import sys
+                if sys.platform == "darwin":
+                    self.ui.error(
+                        'start Chrome with: '
+                        '"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" '
+                        '--remote-debugging-port=9222 --user-data-dir=/tmp/chrome-focus'
+                    )
+                elif sys.platform == "win32":
+                    self.ui.error(
+                        'start Chrome with: chrome.exe --remote-debugging-port=9222 '
+                        '--user-data-dir="%TEMP%\\chrome-focus"'
+                    )
+                else:
+                    self.ui.error(
+                        'start Chrome with: google-chrome --remote-debugging-port=9222 '
+                        '--user-data-dir=/tmp/chrome-focus'
+                    )
             elif "Executable doesn" in msg or "playwright install" in msg.lower():
                 self.ui.error("run: playwright install chromium")
             return
