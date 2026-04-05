@@ -1,0 +1,11 @@
+.git/
+.claude/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+data/
+.env
+.DS_Store
+configs/gamestats.json
