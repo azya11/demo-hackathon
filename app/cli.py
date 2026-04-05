@@ -11,6 +11,7 @@ Commands:
     /resume                        Resume after pause
     /mode strict|soft              Switch enforcement mode
     /help                          List commands
+    /clear                         Clear screen and redraw
     /quit                          Exit app
 """
 
@@ -24,11 +25,14 @@ from dataclasses import dataclass
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import get_app
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.shortcuts import print_formatted_text
 
 from app.session import SessionMode
 
-_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "block", "allow", "blocks", "help", "quit", "exit"]
+_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "time", "block", "allow", "blocks", "help", "clear", "quit", "exit"]
 _MODE_ARGS = ["strict", "soft"]
+_ALERT_THRESHOLDS = [60, 30, 10, 5, 1]  # minutes
 
 
 class _SlashCompleter(Completer):
@@ -62,6 +66,7 @@ class CLI:
         self.orchestrator = orchestrator
         self.ui = ui
         self._running = False
+        self._fired_alerts: set[int] = set()
         import sys
         self._session = PromptSession(completer=_SlashCompleter(), complete_while_typing=True) if sys.stdin.isatty() else None
         self._start_ticker()
@@ -72,10 +77,12 @@ class CLI:
             "pause": self._handle_pause,
             "resume": self._handle_resume,
             "mode": self._handle_mode,
+            "time": self._handle_time,
             "block": self._handle_block,
             "allow": self._handle_allow,
             "blocks": self._handle_blocks,
             "help": self._handle_help,
+            "clear": self._handle_clear,
             "quit": self._handle_quit,
             "exit": self._handle_quit,
         }
@@ -132,6 +139,8 @@ class CLI:
             raise ValueError("minutes must be positive")
         mode = self._parse_mode(parts[2]) if len(parts) > 2 else SessionMode.STRICT
         self.orchestrator.start_session(goal, minutes, mode)
+        self._fired_alerts.clear()
+        self._prefill_alerts()
         self.ui.agent_say(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
 
     def _handle_stop(self, args: str) -> None:
@@ -174,8 +183,42 @@ class CLI:
         self.ui.info(f"blocked ({len(blocked)}): {', '.join(blocked) or '(none)'}")
         self.ui.info(f"allowed ({len(allowed)}): {', '.join(allowed) or '(none)'}")
 
+    def _handle_time(self, args: str) -> None:
+        s = self.orchestrator.session
+        if s is None or not s.is_active():
+            raise ValueError("no active session")
+        raw = args.strip()
+        if not raw:
+            raise ValueError("usage: /time +20 | /time -10 | /time 45")
+        if raw.startswith(("+", "-")):
+            try:
+                delta = int(raw)
+            except ValueError:
+                raise ValueError("usage: /time +20 | /time -10 | /time 45")
+            s.adjust_time(delta)
+            self._fired_alerts.clear()
+            self._prefill_alerts()
+            word = "added" if delta > 0 else "removed"
+            self.ui.agent_say(f"{word} {abs(delta)} minute{'s' if abs(delta) != 1 else ''}.")
+        else:
+            try:
+                new_mins = int(raw)
+            except ValueError:
+                raise ValueError("usage: /time +20 | /time -10 | /time 45")
+            if new_mins <= 0:
+                raise ValueError("minutes must be positive")
+            from datetime import timedelta
+            current_elapsed = s.duration - s.time_remaining()
+            s.duration = current_elapsed + timedelta(minutes=new_mins)
+            self._fired_alerts.clear()
+            self._prefill_alerts()
+            self.ui.agent_say(f"Time set to {new_mins} minutes from now.")
+
     def _handle_help(self, args: str) -> None:
         self.ui.render_help()
+
+    def _handle_clear(self, args: str) -> None:
+        self.ui.console.clear()
 
     def _handle_quit(self, args: str) -> None:
         self.ui.info("bye")
@@ -184,7 +227,7 @@ class CLI:
     # --- helpers ---
 
     def _start_ticker(self) -> None:
-        """Background thread that forces the toolbar to repaint every second."""
+        """Background thread: repaints toolbar and fires time alerts."""
         def _tick():
             while True:
                 _time.sleep(1)
@@ -192,8 +235,33 @@ class CLI:
                     get_app().invalidate()
                 except Exception:
                     pass
+                self._check_alerts()
         t = threading.Thread(target=_tick, daemon=True)
         t.start()
+
+    def _prefill_alerts(self) -> None:
+        """Pre-fire all thresholds already above current time so they don't trigger."""
+        s = self.orchestrator.session
+        if s is None:
+            return
+        mins_left = s.time_remaining().total_seconds() / 60
+        for threshold in _ALERT_THRESHOLDS:
+            if threshold > mins_left:
+                self._fired_alerts.add(threshold)
+
+    def _check_alerts(self) -> None:
+        s = self.orchestrator.session
+        if s is None or not s.is_active():
+            return
+        mins_left = s.time_remaining().total_seconds() / 60
+        for threshold in _ALERT_THRESHOLDS:
+            if mins_left <= threshold and threshold not in self._fired_alerts:
+                self._fired_alerts.add(threshold)
+                label = f"{threshold} minute{'s' if threshold != 1 else ''}"
+                try:
+                    print_formatted_text(HTML(f"\n<yellow>  ! {label} remaining in your session!</yellow>"))
+                except Exception:
+                    pass
 
     def _toolbar(self) -> str:
         s = self.orchestrator.session

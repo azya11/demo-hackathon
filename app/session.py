@@ -95,6 +95,12 @@ class Session:
     def is_expired(self) -> bool:
         return self.time_remaining() <= timedelta(0)
 
+    def adjust_time(self, minutes: int) -> None:
+        """Add or remove minutes from the session duration. minutes can be negative."""
+        self.duration += timedelta(minutes=minutes)
+        if self.duration < timedelta(0):
+            self.duration = timedelta(0)
+
     # --- offense tracking ---
 
     def record_offense(self) -> int:

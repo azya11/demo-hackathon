@@ -158,10 +158,12 @@ class UI:
             ("/pause", "Pause session timer"),
             ("/resume", "Resume after pause"),
             ("/mode strict|soft", "Switch enforcement mode"),
+            ("/time +20 | -10 | 45", "Add, remove, or set session time"),
             ("/block <domain>", "Add a site to the blocklist"),
             ("/allow <domain>", "Add a site to the allowlist"),
             ("/blocks", "Show current block/allow lists"),
             ("/help", "Show this help"),
+            ("/clear", "Clear screen and redraw"),
             ("/quit", "Exit app"),
         ]
         for cmd, desc in rows:
