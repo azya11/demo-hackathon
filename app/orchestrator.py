@@ -16,6 +16,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
+from app.dev_tracker import DevTracker
 from app.models import Event, EventType
 from app.policy import Action, Policy
 from app.session import Session, SessionMode, SessionStatus
@@ -144,6 +145,7 @@ class Orchestrator:
         self._ai_circuit_notified = False
         self._tabs_restored = False
         self._last_tabs_save_tick = -1
+        self.dev_tracker = DevTracker()
 
     # --- session lifecycle ---
 
@@ -156,6 +158,7 @@ class Orchestrator:
         )
         self.session.start()
         self._ai_circuit_notified = False
+        self.dev_tracker.reset()
         if self.ai is not None:
             self.ai.reset_cache()
             self.ui.info(self.ai.status_line())
@@ -368,6 +371,39 @@ class Orchestrator:
     def recent_events(self, limit: int = 20) -> list[Event]:
         return self.events[-limit:]
 
+    def build_dev_review(self) -> str:
+        """Assemble an AI-generated dev-session report. Returns '' if unavailable."""
+        if self.session is None:
+            return ""
+        if self.ai is None or not self.ai.enabled:
+            return ""
+        repos = self.dev_tracker.summary(self.tick_seconds)
+        # Pull distraction signals from the event log (warnings + closes).
+        distractions: list[str] = []
+        seen: set[str] = set()
+        for ev in self.events:
+            if ev.type not in (EventType.WARNING_ISSUED, EventType.TAB_CLOSED, EventType.PROCESS_KILLED):
+                continue
+            key = (ev.domain or "") + "|" + (ev.reason or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            label = ev.domain or ev.url or "unknown"
+            distractions.append(f"{label} ({ev.type.value}: {ev.reason or ''})")
+        duration_min = int(self.session.duration.total_seconds() // 60)
+        return self.ai.review_dev_session(
+            goal=self.session.goal,
+            duration_minutes=duration_min,
+            mode=self.session.mode.value,
+            offense_count=self.session.offense_count,
+            repos_summary=repos,
+            distractions=distractions[:20],
+        )
+
+    def active_repos(self) -> list[dict]:
+        """Fast snapshot of active repos for live status display."""
+        return self.dev_tracker.summary(self.tick_seconds)
+
     # --- tick loop ---
 
     def _start_tick_loop(self) -> None:
@@ -485,6 +521,11 @@ class Orchestrator:
                 f"AI circuit-broken after 3 errors — last: {self.ai._last_error}"
             )
             self._ai_circuit_notified = True
+        # Sample active dev projects (cheap — just a process scan).
+        try:
+            self.dev_tracker.tick()
+        except Exception:
+            pass
         # Rules-based process enforcement first (no AI, no network).
         if self.process_monitor is not None and self.process_monitor.available:
             for proc in self.process_monitor.scan_blocked():

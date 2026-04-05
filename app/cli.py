@@ -179,7 +179,7 @@ from app.models import EventType
 from app.session import SessionMode
 from app.typegame import TypingGame, load_all_stats
 
-_COMMANDS = ["start", "stop", "status", "pause", "resume", "settings", "help", "clear", "quit"]
+_COMMANDS = ["start", "stop", "status", "pause", "resume", "review", "settings", "help", "clear", "quit"]
 _MODE_ARGS = ["chill", "normal", "hardcore"]
 _ALERT_THRESHOLDS = [60, 30, 10, 5, 1]  # minutes
 
@@ -189,6 +189,7 @@ _COMMAND_META = {
     "status":   "show current session state",
     "pause":    "pause session timer",
     "resume":   "resume after pause",
+    "review":   "AI dev-session report (active repos, commits, scope check)",
     "settings": "view/edit all settings (mode, grace, time, blocks, ...)",
     "help":     "show all commands",
     "clear":    "clear the screen",
@@ -262,6 +263,7 @@ class CLI:
             "status": self._handle_status,
             "pause": self._handle_pause,
             "resume": self._handle_resume,
+            "review": self._handle_review,
             "settings": self._handle_settings,
             "help": self._handle_help,
             "gamestats": self._handle_gamestats,
@@ -339,8 +341,47 @@ class CLI:
         self._refresh(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
 
     def _handle_stop(self, args: str) -> None:
+        # Build the review BEFORE stopping the tick loop, so the dev tracker
+        # still has the live state it collected during the session.
+        review = ""
+        try:
+            review = self.orchestrator.build_dev_review()
+        except Exception as e:
+            self.ui.warn(f"review generation failed: {e}")
         session = self.orchestrator.stop_session()
         self.ui.render_summary(session, self.orchestrator.events)
+        if review:
+            self.ui.console.print()
+            self.ui.console.print(review)
+
+    def _handle_review(self, args: str) -> None:
+        s = self.orchestrator.session
+        if s is None:
+            self.ui.error("no session to review — start one with /start")
+            return
+        repos = self.orchestrator.active_repos()
+        if repos:
+            self.ui.info(f"active repos ({len(repos)}):")
+            for r in repos:
+                mins = r["seconds_active"] // 60
+                self.ui.info(
+                    f"  {r['repo']} ({r.get('branch', '?')}): "
+                    f"~{mins}m · {r['commit_count']} commits · "
+                    f"{'uncommitted changes' if r.get('has_uncommitted_changes') else 'clean'}"
+                )
+        else:
+            self.ui.info("no dev repos detected yet — open an editor in a git project")
+        self.ui.info("generating AI review...")
+        try:
+            review = self.orchestrator.build_dev_review()
+        except Exception as e:
+            self.ui.error(f"review failed: {e}")
+            return
+        if not review:
+            self.ui.warn("AI review unavailable (check AI status)")
+            return
+        self.ui.console.print()
+        self.ui.console.print(review)
 
     def _handle_status(self, args: str) -> None:
         self._refresh()

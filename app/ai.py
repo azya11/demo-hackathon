@@ -24,6 +24,7 @@ from app.policy import Action, Decision
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 _TAB_PROMPT_PATH = _PROMPTS_DIR / "classify_tab.txt"
 _PROCESS_PROMPT_PATH = _PROMPTS_DIR / "classify_process.txt"
+_REVIEW_PROMPT_PATH = _PROMPTS_DIR / "review_session.txt"
 
 
 class AI:
@@ -131,6 +132,43 @@ class AI:
         if "rate-limited" not in decision.reason and "ai error" not in decision.reason:
             self._cache[cache_key] = decision
         return decision
+
+    def review_dev_session(
+        self,
+        goal: str,
+        duration_minutes: int,
+        mode: str,
+        offense_count: int,
+        repos_summary: list[dict],
+        distractions: list[str],
+    ) -> str:
+        """Generate a markdown end-of-session report. Returns '' on failure."""
+        if not self._enabled:
+            return ""
+        try:
+            template = _REVIEW_PROMPT_PATH.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+        prompt = (
+            template
+            .replace("{{goal}}", goal or "(no goal set)")
+            .replace("{{duration_minutes}}", str(duration_minutes))
+            .replace("{{mode}}", mode or "")
+            .replace("{{offense_count}}", str(offense_count))
+            .replace("{{repos_json}}", json.dumps(repos_summary, indent=2, default=str) or "[]")
+            .replace("{{distractions}}", "\n".join(f"- {d}" for d in distractions) or "(none observed)")
+        )
+        try:
+            text = self._generate(prompt)
+            # Strip code fences if the model wrapped the markdown.
+            text = text.strip()
+            if text.startswith("```"):
+                text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+                text = re.sub(r"\n?```$", "", text)
+            return text.strip()
+        except Exception as e:
+            self._last_error = f"{type(e).__name__}: {e}"
+            return ""
 
     def classify_process(self, process_name: str, goal: str) -> Decision:
         """Return a Decision for a running process. Cached by process name."""
