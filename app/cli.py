@@ -442,7 +442,9 @@ class CLI:
             bar_color = "fg:#f38ba8"
 
         colors = {"active": "fg:#a6e3a1", "paused": "fg:#f9e2af", "stopped": "fg:#f38ba8", "completed": "fg:#89b4fa", "idle": "fg:#585b70"}
+        icons  = {"active": "▶", "paused": "⏸", "stopped": "■", "completed": "✓", "idle": "○"}
         st_color   = colors.get(s.status.value, "fg:#cdd6f4")
+        icon       = icons.get(s.status.value, "●")
         mode_color = "fg:#f38ba8" if s.mode.value == "strict" else "fg:#94e2d5"
         off_color  = "fg:#a6e3a1" if s.offense_count == 0 else ("fg:#f9e2af" if s.offense_count < 3 else "fg:#f38ba8")
         goal = s.goal if len(s.goal) <= 28 else s.goal[:26] + "..."
