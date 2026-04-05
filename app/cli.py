@@ -24,7 +24,7 @@ from prompt_toolkit.completion import Completer, Completion
 
 from app.session import SessionMode
 
-_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "help", "quit", "exit"]
+_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "block", "allow", "blocks", "help", "quit", "exit"]
 _MODE_ARGS = ["strict", "soft"]
 
 
@@ -68,6 +68,9 @@ class CLI:
             "pause": self._handle_pause,
             "resume": self._handle_resume,
             "mode": self._handle_mode,
+            "block": self._handle_block,
+            "allow": self._handle_allow,
+            "blocks": self._handle_blocks,
             "help": self._handle_help,
             "quit": self._handle_quit,
             "exit": self._handle_quit,
@@ -146,6 +149,26 @@ class CLI:
         mode = self._parse_mode(args.strip())
         self.orchestrator.set_mode(mode)
         self._refresh(f"Mode set to {mode.value}.")
+
+    def _handle_block(self, args: str) -> None:
+        domain = args.strip()
+        if not domain:
+            raise ValueError("usage: /block <domain>")
+        d = self.orchestrator.add_block(domain)
+        self._refresh(f"Blocked {d}.")
+
+    def _handle_allow(self, args: str) -> None:
+        domain = args.strip()
+        if not domain:
+            raise ValueError("usage: /allow <domain>")
+        d = self.orchestrator.add_allow(domain)
+        self._refresh(f"Allowed {d}.")
+
+    def _handle_blocks(self, args: str) -> None:
+        blocked = self.orchestrator.policy.list_blocked()
+        allowed = self.orchestrator.policy.list_allowed()
+        self.ui.info(f"blocked ({len(blocked)}): {', '.join(blocked) or '(none)'}")
+        self.ui.info(f"allowed ({len(allowed)}): {', '.join(allowed) or '(none)'}")
 
     def _handle_help(self, args: str) -> None:
         self.ui.render_help()

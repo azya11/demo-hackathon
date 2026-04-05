@@ -123,6 +123,9 @@ class UI:
             ("/pause", "Pause session timer"),
             ("/resume", "Resume after pause"),
             ("/mode strict|soft", "Switch enforcement mode"),
+            ("/block <domain>", "Add a site to the blocklist"),
+            ("/allow <domain>", "Add a site to the allowlist"),
+            ("/blocks", "Show current block/allow lists"),
             ("/help", "Show this help"),
             ("/quit", "Exit app"),
         ]

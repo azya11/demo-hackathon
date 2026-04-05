@@ -1,41 +1,135 @@
 """Gemini reasoning layer.
 
-Used only for:
-    1. Ambiguous tab classification (rules couldn't decide)
-    2. Goal parsing (turn free-text goal → structured keywords / categories)
-    3. Natural-language explanations for decisions
+Used only for ambiguous tabs (rules couldn't decide). Returns a
+Decision-compatible verdict. On any error, falls back to ALLOW — AI
+must never block enforcement.
 
-Kept intentionally thin — rules-first means AI is the fallback, not the driver.
+Supports two auth paths:
+  1. Service-account JSON in configs/ → Vertex AI (google-genai SDK)
+  2. GEMINI_API_KEY / GOOGLE_API_KEY env var → Gemini API (google-generativeai)
 """
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
+
+from app.policy import Action, Decision
+
+
+_PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "classify_tab.txt"
+
 
 class AI:
-    """Wraps Gemini calls for classification + explanation."""
+    """Thin wrapper around Gemini for tab classification."""
 
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash") -> None:
-        # TODO: configure google.generativeai client
-        # TODO: load prompts from prompts/ directory
-        raise NotImplementedError
+    def __init__(
+        self,
+        api_key: str = "",
+        model: str = "gemini-1.5-flash",
+        service_account_path: Path | None = None,
+        location: str = "us-central1",
+    ) -> None:
+        self._enabled = False
+        self._backend = None  # "vertex" | "genai"
+        self._client = None
+        self._model_name = model
+        self._prompt_template = ""
+        self._last_error: str = ""
+        self._error_count: int = 0
+        try:
+            self._prompt_template = _PROMPT_PATH.read_text(encoding="utf-8")
+        except Exception:
+            return
 
-    # --- classification ---
+        # Prefer service account (Vertex AI) if provided.
+        if service_account_path and service_account_path.exists():
+            try:
+                self._init_vertex(service_account_path, location)
+                return
+            except Exception as e:
+                self._last_error = f"vertex init: {type(e).__name__}: {e}"
 
-    def classify_tab(self, context, goal: str, recent_activity: list[str]):
-        """Return Decision-compatible dict: {decision, confidence, short_reason}."""
-        # TODO: render classify_tab.txt with context
-        # TODO: call model, parse JSON response
-        # TODO: fall back to ALLOW on parse errors (never block on AI failure)
-        raise NotImplementedError
+        # Fallback: plain API key via google-generativeai.
+        if api_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                self._client = genai.GenerativeModel(model)
+                self._backend = "genai"
+                self._enabled = True
+            except Exception as e:
+                self._last_error = f"genai init: {type(e).__name__}: {e}"
+                self._enabled = False
 
-    # --- goal understanding ---
+    def _init_vertex(self, sa_path: Path, location: str) -> None:
+        """Initialize the google-genai client against Vertex AI."""
+        import os
+        sa_data = json.loads(sa_path.read_text(encoding="utf-8"))
+        project_id = sa_data.get("project_id")
+        if not project_id:
+            raise RuntimeError("service account missing project_id")
+        # google-auth reads this env var to pick up the service account.
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(sa_path)
+        from google import genai  # google-genai
+        self._client = genai.Client(vertexai=True, project=project_id, location=location)
+        self._backend = "vertex"
+        self._enabled = True
 
-    def parse_goal(self, goal_text: str) -> dict:
-        """Extract {subject, keywords[], suggested_allowlist[], suggested_blocklist[]}."""
-        raise NotImplementedError
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
 
-    # --- explanations ---
+    def classify_tab(self, context, goal: str, recent_activity: list[str] | None = None) -> Decision:
+        """Return a Decision. Always returns ALLOW on any failure."""
+        if not self._enabled:
+            return Decision(Action.ALLOW, "ai disabled", 0.0)
+        prompt = (
+            self._prompt_template
+            .replace("{{goal}}", goal or "")
+            .replace("{{page_title}}", context.title or "")
+            .replace("{{url}}", context.url or "")
+            .replace("{{recent_activity}}", ", ".join(recent_activity or []))
+        )
+        try:
+            text = self._generate(prompt)
+            data = _extract_json(text)
+            verdict = (data.get("decision") or "ALLOW").upper()
+            reason = data.get("short_reason") or "ai decision"
+            confidence = float(data.get("confidence") or 0.0)
+            if verdict == "BLOCK":
+                return Decision(Action.BLOCK, f"AI: {reason}", confidence)
+            if verdict == "WARN":
+                return Decision(Action.WARN, f"AI: {reason}", confidence)
+            return Decision(Action.ALLOW, f"AI: {reason}", confidence)
+        except Exception as e:
+            self._last_error = f"{type(e).__name__}: {e}"
+            self._error_count += 1
+            return Decision(Action.ALLOW, f"ai error: {self._last_error[:120]}", 0.0)
 
-    def explain_decision(self, decision, context, goal: str) -> str:
-        """One-sentence natural explanation for the terminal UI."""
-        raise NotImplementedError
+    def _generate(self, prompt: str) -> str:
+        if self._backend == "vertex":
+            resp = self._client.models.generate_content(model=self._model_name, contents=prompt)
+            return (getattr(resp, "text", None) or "").strip()
+        if self._backend == "genai":
+            resp = self._client.generate_content(prompt)
+            return (getattr(resp, "text", None) or "").strip()
+        return ""
+
+
+def _extract_json(text: str) -> dict:
+    """Pull the first JSON object out of a model response."""
+    if not text:
+        return {}
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return {}
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {}
