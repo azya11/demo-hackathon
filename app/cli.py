@@ -405,9 +405,10 @@ class CLI:
 
         if s is None or s.status.value in ("stopped", "completed"):
             return FormattedText([
-                ("fg:#cba6f7", "  * Focus Guardian"),
-                (DIM,          "  |  no active session  |  "),
-                (MED,          '/start "goal" <minutes>  to begin'),
+                ("fg:#cba6f7",  "  ◆  Focus Guardian"),
+                (DIM,           "  │  no active session  │  "),
+                (MED,           '/start "goal" <minutes>'),
+                (DIM,           "  to begin"),
             ])
 
         # time remaining
@@ -447,21 +448,22 @@ class CLI:
         goal = s.goal if len(s.goal) <= 28 else s.goal[:26] + "..."
         pct  = f"{int(frac * 100):3d}%"
 
+        pct = f"{int(frac * 100):3d}%"
         return FormattedText([
-            ("fg:#cba6f7", "  * "),
-            (st_color,     s.status.value.upper()),
-            (DIM,          "  |  "),
-            ("fg:#cdd6f4", f'"{goal}"'),
-            (DIM,          "  |  ["),
-            (bar_color,    bar),
-            (DIM,          f"] {pct}  |  "),
-            ("fg:#94e2d5", f"{time_str} left"),
-            (DIM,          "  |  elapsed "),
-            (MED,          elapsed_str),
-            (DIM,          "  |  "),
-            (mode_color,   s.mode.value),
-            (DIM,          "  |  "),
-            (off_color,    f"! {s.offense_count}"),
+            ("fg:#cba6f7",  "  ◆  "),
+            (st_color,      f"{icon} {s.status.value.upper()}"),
+            (DIM,           "  │  "),
+            ("fg:#cdd6f4",  f'"{goal}"'),
+            (DIM,           "  │  "),
+            (bar_color,     bar),
+            (DIM,           f" {pct}  │  "),
+            ("fg:#94e2d5",  f"⏱ {time_str} left"),
+            (DIM,           "  │  elapsed "),
+            (MED,           elapsed_str),
+            (DIM,           "  │  "),
+            (mode_color,    s.mode.value),
+            (DIM,           "  │  ⚠ "),
+            (off_color,     str(s.offense_count)),
         ])
 
     def _refresh(self, message: str | None = None) -> None:
