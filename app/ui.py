@@ -290,6 +290,99 @@ class UI:
                 padding=(1, 2),
             )
         )
+
+    def render_gamestats(self, sessions: list) -> None:
+        """Show typing game history — styled to match the Mocha palette."""
+        self._clear()
+        self._print_header()
+        if not sessions:
+            self.console.print(
+                Panel(
+                    Align.center(Text(
+                        "No game sessions recorded yet. Play with /pause.",
+                        style=_SUBTEXT0,
+                    )),
+                    border_style=_SURFACE2,
+                    box=box.ROUNDED,
+                    padding=(1, 2),
+                )
+            )
+            return
+
+        best_wpm = max(s["best_wpm"] for s in sessions)
+        best_acc = max(s["best_accuracy"] for s in sessions)
+        all_avg_wpm = round(sum(s["avg_wpm"] for s in sessions) / len(sessions), 1)
+        all_avg_acc = round(sum(s["avg_accuracy"] for s in sessions) / len(sessions), 1)
+        total_rounds = sum(s["rounds"] for s in sessions)
+
+        def wpm_color(v: float) -> str:
+            return _GREEN if v >= 60 else _YELLOW if v >= 30 else _RED
+
+        def acc_color(v: float) -> str:
+            return _GREEN if v >= 95 else _YELLOW if v >= 80 else _RED
+
+        summary = Text()
+        summary.append("Sessions played       ", style=_SUBTEXT1)
+        summary.append(f"{len(sessions)}\n", style=_TEXT)
+        summary.append("Total rounds          ", style=_SUBTEXT1)
+        summary.append(f"{total_rounds}\n", style=_TEXT)
+        summary.append("All-time best WPM     ", style=_SUBTEXT1)
+        summary.append(f"{best_wpm}\n", style=wpm_color(best_wpm))
+        summary.append("All-time best accuracy ", style=_SUBTEXT1)
+        summary.append(f"{best_acc}%\n", style=acc_color(best_acc))
+        summary.append("Overall avg WPM       ", style=_SUBTEXT1)
+        summary.append(f"{all_avg_wpm}\n", style=wpm_color(all_avg_wpm))
+        summary.append("Overall avg accuracy  ", style=_SUBTEXT1)
+        summary.append(f"{all_avg_acc}%", style=acc_color(all_avg_acc))
+
+        self.console.print(
+            Panel(
+                summary,
+                title=_gradient_text(" Typing Game — All Time ", _MAUVE, _LAVENDER),
+                border_style=_MAUVE,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+        self.console.print()
+
+        table = Table(
+            box=box.ROUNDED,
+            border_style=_SURFACE2,
+            header_style=f"bold {_MAUVE}",
+            show_header=True,
+            padding=(0, 1),
+        )
+        table.add_column("#",        style=_SUBTEXT0, no_wrap=True)
+        table.add_column("Date",     style=_TEXT, no_wrap=True)
+        table.add_column("Rounds",   style=_TEXT)
+        table.add_column("Avg WPM",  style=_TEXT)
+        table.add_column("Best WPM", style=_TEXT)
+        table.add_column("Avg Acc",  style=_TEXT)
+        table.add_column("Best Acc", style=_TEXT)
+        table.add_column("Time",     style=_TEXT)
+
+        for i, s in enumerate(sessions[-20:], 1):
+            table.add_row(
+                str(i),
+                s["date"],
+                str(s["rounds"]),
+                Text(str(s["avg_wpm"]),       style=wpm_color(s["avg_wpm"])),
+                Text(str(s["best_wpm"]),      style=wpm_color(s["best_wpm"])),
+                Text(f"{s['avg_accuracy']}%",  style=acc_color(s["avg_accuracy"])),
+                Text(f"{s['best_accuracy']}%", style=acc_color(s["best_accuracy"])),
+                f"{s['total_time']}s",
+            )
+
+        self.console.print(
+            Panel(
+                Align.center(table),
+                title=_gradient_text(" Session History ", _MAUVE, _LAVENDER),
+                border_style=_MAUVE,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
         self.console.print()
 
     def render_help(self) -> None:
@@ -310,7 +403,7 @@ class UI:
             ('/start "goal" <min>', "Begin a focus session  [dim][mode][/dim]"),
             ("/status",             "Show current session state"),
             ("/stop",               "End current session"),
-            ("/pause",              "Pause session timer"),
+            ("/pause",              "Pause session timer (offers typing game)"),
             ("/resume",             "Resume after pause"),
             ("/mode strict|soft",   "Switch enforcement mode"),
             ("/time +20 | -10 | 45","Add, remove, or set session time"),
@@ -320,6 +413,7 @@ class UI:
             ("/pblock <process>",   "Block a process during the session"),
             ("/pallow <process>",   "Remove a process from the blocklist"),
             ("/pblocks",            "Show blocked and allowed processes"),
+            ("/gamestats",          "Show typing game statistics"),
             ("/help",               "Show this help"),
             ("/clear",              "Clear screen and redraw"),
             ("/quit",               "Exit app"),

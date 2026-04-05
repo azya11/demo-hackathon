@@ -78,6 +78,7 @@ _COMPLETION_STYLE = Style.from_dict({
 
 from app.models import EventType
 from app.session import SessionMode
+from app.typegame import TypingGame, load_all_stats
 
 _COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "time", "block", "allow", "blocks", "pblock", "pallow", "pblocks", "help", "clear", "quit"]
 _MODE_ARGS = ["strict", "soft"]
@@ -187,6 +188,7 @@ class CLI:
             "pallow": self._handle_pallow,
             "pblocks": self._handle_pblocks,
             "help": self._handle_help,
+            "gamestats": self._handle_gamestats,
             "clear": self._handle_clear,
             "quit": self._handle_quit,
             "exit": self._handle_quit,
@@ -260,6 +262,14 @@ class CLI:
     def _handle_pause(self, args: str) -> None:
         self.orchestrator.pause_session()
         self._refresh("Session paused.")
+        self.ui.info("Want to play the typing game while on break? [y/N]")
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer == "y":
+            TypingGame().run()
+            self._refresh("Welcome back! Session still paused.")
 
     def _handle_resume(self, args: str) -> None:
         self.orchestrator.resume_session()
@@ -350,6 +360,11 @@ class CLI:
 
     def _handle_help(self, args: str) -> None:
         self.ui.render_help()
+
+    def _handle_gamestats(self, args: str) -> None:
+        self.ui.render_gamestats(load_all_stats())
+        input("\nPress Enter to return...")
+        self._refresh()
 
     def _handle_clear(self, args: str) -> None:
         self.ui._clear()
