@@ -6,10 +6,42 @@ Every action the agent can take on the world. Kept separate so we can
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import timedelta
+from pathlib import Path
 
 from app.models import Event, EventType
 from app.policy import Action
+
+
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _spawn_popup(message: str) -> None:
+    """Open a new terminal window showing a Rich distraction warning."""
+    python = _ROOT / ".venv" / "Scripts" / "python.exe"
+    if not python.exists():
+        python = Path(sys.executable)
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(
+                [str(python), "-m", "app.popup", message],
+                cwd=str(_ROOT),
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+        else:
+            for term in ("gnome-terminal", "xterm", "konsole"):
+                try:
+                    subprocess.Popen(
+                        [term, "--", str(python), "-m", "app.popup", message],
+                        cwd=str(_ROOT),
+                    )
+                    break
+                except FileNotFoundError:
+                    continue
+    except Exception:
+        pass
 
 
 class Tools:
@@ -26,6 +58,7 @@ class Tools:
     def warn_user(self, message: str, session_id: int, url: str = "", domain: str = "") -> None:
         """Push-notify the user in the terminal (soft-mode warning)."""
         self.ui.warn(f"[focus] {message}")
+        _spawn_popup(message)
         self._log(EventType.WARNING_ISSUED, session_id, url=url, domain=domain, reason=message)
 
     def close_tab(self, context, session_id: int, reason: str) -> bool:
@@ -85,7 +118,9 @@ class Tools:
 
     def warn_process(self, proc_info, session_id: int, reason: str) -> None:
         """Soft-mode notification about a running blocked process."""
-        self.ui.warn(f"[focus] {proc_info.name} is running — {reason}")
+        message = f"{proc_info.name} is running — {reason}"
+        self.ui.warn(f"[focus] {message}")
+        _spawn_popup(message)
         self._log(
             EventType.WARNING_ISSUED, session_id,
             domain=proc_info.name, reason=reason,
