@@ -89,12 +89,13 @@ class Tools:
             domain=proc_info.name, reason=reason,
         )
 
-    def apply_process(self, proc_info, session) -> None:
+    def apply_process(self, proc_info, session, reason: str | None = None) -> None:
         """Run the blocked-process action for the current mode, with dedup."""
         from app.session import SessionMode
         key_id = f"pid:{proc_info.pid}"
         is_new = session.should_count_offense(key_id, proc_info.name)
-        reason = f"{proc_info.name} is blocked ({session.mode.value})"
+        if reason is None:
+            reason = f"{proc_info.name} is blocked ({session.mode.value})"
         if session.mode == SessionMode.STRICT:
             if is_new:
                 session.record_offense()

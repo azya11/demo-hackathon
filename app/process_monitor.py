@@ -18,6 +18,38 @@ def _normalize(name: str) -> str:
     return (name or "").strip().lower()
 
 
+# Windows system processes — never surface these to the AI judge.
+_SYSTEM_PROCESSES = {
+    "system", "system idle process", "registry", "memory compression",
+    "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "services.exe",
+    "lsass.exe", "svchost.exe", "fontdrvhost.exe", "dwm.exe", "taskhostw.exe",
+    "explorer.exe", "runtimebroker.exe", "sihost.exe", "ctfmon.exe",
+    "searchindexer.exe", "searchprotocolhost.exe", "searchfilterhost.exe",
+    "audiodg.exe", "conhost.exe", "dllhost.exe", "smartscreen.exe",
+    "applicationframehost.exe", "startmenuexperiencehost.exe", "shellexperiencehost.exe",
+    "wmiprvse.exe", "wmiadap.exe", "spoolsv.exe", "securityhealthservice.exe",
+    "securityhealthsystray.exe", "msmpeng.exe", "nissrv.exe", "mpdefendercoreservice.exe",
+    "wudfhost.exe", "updateorchestrator.exe", "trustedinstaller.exe", "tiworker.exe",
+    "usocoreworker.exe", "backgroundtaskhost.exe", "backgroundtransferhost.exe",
+    "textinputhost.exe", "lockapp.exe", "crosshairconfiguration.exe",
+    "python.exe", "pythonw.exe", "node.exe",  # tools used by the agent itself
+    # hardware vendor drivers / overlays / RGB / peripheral managers — never distractions
+    "nvcontainer.exe", "nvidia overlay.exe", "nvidia share.exe", "nvidia web helper.exe",
+    "nvdisplay.container.exe", "nvbroadcast.container.exe", "nvtelemetrycontainer.exe",
+    "lghub.exe", "lghub_agent.exe", "lghub_system_tray.exe", "lghub_updater.exe",
+    "logi_crayon.exe", "logioptionsplus.exe", "logioverlay.exe",
+    "razer central service.exe", "razer synapse service.exe", "rzsynapse.exe",
+    "icue.exe", "corsair.service.exe",
+    "armourycrate.exe", "asus framework service.exe",
+    "realtekaudioservice64.exe", "ravcpl64.exe",
+    "igfxem.exe", "igfxtray.exe", "igfxhk.exe", "igfxext.exe",
+    "radeonsoftware.exe", "amdrsserv.exe", "cncmd.exe",
+    # cloud sync / update agents — background, not interactive distractions
+    "onedrive.exe", "dropbox.exe", "googledrivefs.exe", "googleupdate.exe",
+    "microsoftedgeupdate.exe", "adobeupdateservice.exe", "crashpad_handler.exe",
+}
+
+
 @dataclass
 class ProcessInfo:
     """Snapshot of a running process we care about."""
@@ -64,6 +96,31 @@ class ProcessMonitor:
                     continue
                 if name in blocklist:
                     out.append(ProcessInfo(pid=proc.info["pid"], name=name, timestamp=now))
+            except (self._psutil.NoSuchProcess, self._psutil.AccessDenied):
+                continue
+        return out
+
+    def scan_candidates(self) -> list[ProcessInfo]:
+        """Return user-facing processes not on any list — candidates for AI judgment.
+
+        Excludes Windows system processes, explicit blocklist (handled by
+        scan_blocked), and explicit allowlist. One entry per pid.
+        """
+        if self._psutil is None:
+            return []
+        with self._lock:
+            blocklist = set(self._blocklist)
+            allowlist = set(self._allowlist)
+        out: list[ProcessInfo] = []
+        now = datetime.now()
+        for proc in self._psutil.process_iter(["pid", "name"]):
+            try:
+                name = _normalize(proc.info.get("name") or "")
+                if not name:
+                    continue
+                if name in _SYSTEM_PROCESSES or name in blocklist or name in allowlist:
+                    continue
+                out.append(ProcessInfo(pid=proc.info["pid"], name=name, timestamp=now))
             except (self._psutil.NoSuchProcess, self._psutil.AccessDenied):
                 continue
         return out

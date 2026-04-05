@@ -13,7 +13,7 @@
     "start_url": "about:blank"
   },
   "ai": {
-    "model": "gemini-1.5-flash",
+    "model": "gemini-2.5-flash",
     "enabled": true
   },
   "storage": {
