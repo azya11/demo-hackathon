@@ -41,6 +41,9 @@ class Session:
         self.paused_duration: timedelta = timedelta(0)
         self.offense_count: int = 0
         self.last_warning_at: datetime | None = None
+        # Tracks which (tab, domain) pairs we've already counted as offenses,
+        # so we don't re-count every tick the same blocked tab remains open.
+        self._counted_offenses: set[tuple[str, str]] = set()
 
     # --- state transitions ---
 
@@ -105,3 +108,11 @@ class Session:
         self.offense_count += 1
         self.last_warning_at = datetime.now()
         return self.offense_count
+
+    def should_count_offense(self, tab_id: str, domain: str) -> bool:
+        """Return True if this (tab, domain) hasn't been counted yet."""
+        key = (tab_id or "", domain or "")
+        if key in self._counted_offenses:
+            return False
+        self._counted_offenses.add(key)
+        return True

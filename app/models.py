@@ -23,6 +23,8 @@ class EventType(str, Enum):
     AI_CLASSIFIED = "ai_classified"
     MODE_CHANGED = "mode_changed"
     TIME_ADJUSTED = "time_adjusted"
+    PROCESS_KILLED = "process_killed"
+    PROCESS_OBSERVED = "process_observed"
 
 
 @dataclass
