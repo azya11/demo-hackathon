@@ -1,8 +1,8 @@
 {
-  "default_mode": "chill",
+  "default_mode": "hardcore",
   "tick_seconds": 2.0,
   "warn_before_close_seconds": 3,
-  "normal_mode_grace_minutes": 15.0,
+  "normal_mode_grace_minutes": 2.0,
   "escalation": {
     "warn_until_offense": 2,
     "block_from_offense": 3
@@ -19,5 +19,6 @@
   },
   "storage": {
     "db_path": "data/sessions.db"
-  }
+  },
+  "theme": "Sakura Dream"
 }

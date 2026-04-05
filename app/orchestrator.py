@@ -244,6 +244,8 @@ class Orchestrator:
             data = {}
         data["default_mode"] = self.default_mode.value
         data["normal_mode_grace_minutes"] = round(self.grace_seconds / 60, 2)
+        import app.themes as _themes
+        data["theme"] = _themes.current.name
         self._atomic_write(path, json.dumps(data, indent=2) + "\n")
 
     def _save_sites(self) -> None:

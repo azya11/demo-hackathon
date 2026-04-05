@@ -495,6 +495,7 @@ class CLI:
 
     def _settings_menu(self) -> None:
         items = [
+            ("theme",   "color theme (←/→ to switch)"),
             ("mode",    "enforcement mode (←/→ to switch)"),
             ("grace",   "normal-mode grace period (←/→ to switch)"),
             ("time",    "adjust session time (+20 | -10 | 45)"),
@@ -508,9 +509,13 @@ class CLI:
         mode_values = ["chill", "normal", "hardcore"]
         grace_values = [2, 5, 10, 15]  # minutes
 
+        import app.themes as _themes
+
         def _get_inline(name: str) -> str | None:
             o = self.orchestrator
             s = o.session
+            if name == "theme":
+                return _themes.current.name
             if name == "mode":
                 return (s.mode.value if s else o.default_mode.value)
             if name == "grace":
@@ -518,6 +523,10 @@ class CLI:
             return None
 
         def _on_cycle(name: str, direction: int) -> None:
+            if name == "theme":
+                idx = next((i for i, t in enumerate(_themes.THEMES) if t.name == _themes.current.name), 0)
+                _themes.current = _themes.THEMES[(idx + direction) % len(_themes.THEMES)]
+                return
             o = self.orchestrator
             if name == "mode":
                 s = o.session
@@ -564,13 +573,14 @@ class CLI:
             )
             if idx is None:
                 self._settings_save_all()
-                break
+                self._refresh()
+                return
             name = items[idx][0]
-            # Mode/grace are cycled with ←/→ — Enter here confirms & exits.
-            if name in ("mode", "grace"):
+            # Theme/mode/grace are cycled with ←/→ — Enter confirms & exits.
+            if name in ("theme", "mode", "grace"):
                 self._settings_save_all()
-                self.ui.agent_say("Settings saved.")
-                break
+                self._refresh("Settings saved.")
+                return
             # Display-only actions: show the list and wait for Enter.
             if name in ("blocks", "pblocks"):
                 try:
@@ -589,6 +599,83 @@ class CLI:
                 self._settings_dispatch(name, arg)
             except Exception as e:
                 self.ui.error(str(e))
+
+    def _pick_theme(self) -> None:
+        """Arrow-select theme picker with live color preview."""
+        import app.themes as _themes
+        themes = _themes.THEMES
+
+        # Build items: each theme's name shown in its own accent color
+        def _render_themed(items, state):
+            """Custom render that colors each row with its theme's accent."""
+            lines = []
+            lines.append(("fg:#cba6f7 bold", "  Themes  (↑/↓ browse · Enter apply · Esc back)\n\n"))
+            for i, (name, desc) in enumerate(items):
+                th = themes[i]
+                is_sel = i == state["idx"]
+                if is_sel:
+                    lines.append((f"bold {th.accent}", f"  \u276f {name:<22}"))
+                    lines.append((th.dim,              f"  {desc}\n"))
+                else:
+                    lines.append((th.dim,              f"    {name:<22}  {desc}\n"))
+            lines.append(("", "\n"))
+            return lines
+
+        # Use a custom _arrow_select-like loop with themed rendering
+        from prompt_toolkit import Application
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout import Layout
+        from prompt_toolkit.layout.containers import HSplit, Window
+        from prompt_toolkit.layout.controls import FormattedTextControl
+        from prompt_toolkit.formatted_text import FormattedText
+
+        items = [(t.name, t.description) for t in themes]
+        cur_name = _themes.current.name
+        state = {"idx": next((i for i, t in enumerate(themes) if t.name == cur_name), 0)}
+
+        def _render():
+            return _render_themed(items, state)
+
+        kb = KeyBindings()
+
+        @kb.add("up")
+        @kb.add("k")
+        def _up(event):
+            state["idx"] = (state["idx"] - 1) % len(themes)
+            event.app.invalidate()
+
+        @kb.add("down")
+        @kb.add("j")
+        def _down(event):
+            state["idx"] = (state["idx"] + 1) % len(themes)
+            event.app.invalidate()
+
+        @kb.add("enter")
+        def _enter(event):
+            event.app.exit(result=state["idx"])
+
+        @kb.add("escape", eager=True)
+        @kb.add("q")
+        @kb.add("c-c")
+        def _cancel(event):
+            event.app.exit(result=None)
+
+        control = FormattedTextControl(_render, focusable=True, show_cursor=False)
+        window = Window(control, height=len(themes) + 5, always_hide_cursor=True)
+        app = Application(
+            layout=Layout(HSplit([window])),
+            key_bindings=kb,
+            full_screen=False,
+            mouse_support=False,
+        )
+        try:
+            result = app.run()
+        except Exception:
+            result = None
+
+        if result is not None:
+            _themes.current = themes[result]
+            self.ui.agent_say(f"Theme set to {_themes.current.name}.")
 
     def _settings_save_all(self) -> None:
         o = self.orchestrator
@@ -694,17 +781,19 @@ class CLI:
                     pass
 
     def _toolbar(self):
+        import app.themes as _themes
         from prompt_toolkit.formatted_text import FormattedText
-        DIM  = "fg:#585b70"
-        MED  = "fg:#a6adc8"
+        th = _themes.current
+        DIM = f"fg:{th.dim}"
+        MED = f"fg:{th.subtext}"
         s = self.orchestrator.session
 
         if s is None or s.status.value in ("stopped", "completed"):
             return FormattedText([
-                ("fg:#cba6f7",  "  ◆  Focus Guardian"),
-                (DIM,           "  │  no active session  │  "),
-                (MED,           '/start "goal" <minutes>'),
-                (DIM,           "  to begin"),
+                (f"fg:{th.accent}",  "  ◆  Focus Guardian"),
+                (DIM,                "  │  no active session  │  "),
+                (MED,                '/start "goal" <minutes>'),
+                (DIM,                "  to begin"),
             ])
 
         # time remaining
@@ -725,43 +814,37 @@ class CLI:
         else:
             elapsed_str = "00:00:00"
 
-        # progress bar (ASCII only — block chars have ambiguous display width)
         dur  = max(s.duration.total_seconds(), 1)
         frac = max(0.0, min(1.0, total_secs / dur))
         filled = round(frac * 20)
         bar = "#" * filled + "-" * (20 - filled)
-        if frac > 0.5:
-            bar_color = "fg:#a6e3a1"
-        elif frac > 0.25:
-            bar_color = "fg:#f9e2af"
-        else:
-            bar_color = "fg:#f38ba8"
+        bar_color = f"fg:{th.active if frac > 0.5 else (th.warning if frac > 0.25 else th.error)}"
 
-        colors = {"active": "fg:#a6e3a1", "paused": "fg:#f9e2af", "stopped": "fg:#f38ba8", "completed": "fg:#89b4fa", "idle": "fg:#585b70"}
-        icons  = {"active": "▶", "paused": "⏸", "stopped": "■", "completed": "✓", "idle": "○"}
-        st_color   = colors.get(s.status.value, "fg:#cdd6f4")
-        icon       = icons.get(s.status.value, "●")
-        mode_color = {"hardcore": "fg:#f38ba8", "normal": "fg:#f9e2af", "chill": "fg:#94e2d5"}.get(s.mode.value, "fg:#cdd6f4")
-        off_color  = "fg:#a6e3a1" if s.offense_count == 0 else ("fg:#f9e2af" if s.offense_count < 3 else "fg:#f38ba8")
+        icons     = {"active": "▶", "paused": "⏸", "stopped": "■", "completed": "✓", "idle": "○"}
+        st_colors = {"active": th.active, "paused": th.warning, "stopped": th.error, "completed": th.complete, "idle": th.dim}
+        icon      = icons.get(s.status.value, "●")
+        st_color  = f"fg:{st_colors.get(s.status.value, th.text)}"
+        _mode_map = {"hardcore": th.error, "normal": th.warning, "chill": th.info, "strict": th.error, "soft": th.info}
+        mode_color = f"fg:{_mode_map.get(s.mode.value, th.text)}"
+        off_color  = f"fg:{th.active if s.offense_count == 0 else (th.warning if s.offense_count < 3 else th.error)}"
         goal = s.goal if len(s.goal) <= 28 else s.goal[:26] + "..."
         pct  = f"{int(frac * 100):3d}%"
 
-        pct = f"{int(frac * 100):3d}%"
         return FormattedText([
-            ("fg:#cba6f7",  "  ◆  "),
-            (st_color,      f"{icon} {s.status.value.upper()}"),
-            (DIM,           "  │  "),
-            ("fg:#cdd6f4",  f'"{goal}"'),
-            (DIM,           "  │  "),
-            (bar_color,     bar),
-            (DIM,           f" {pct}  │  "),
-            ("fg:#94e2d5",  f"⏱ {time_str} left"),
-            (DIM,           "  │  elapsed "),
-            (MED,           elapsed_str),
-            (DIM,           "  │  "),
-            (mode_color,    s.mode.value),
-            (DIM,           "  │  ⚠ "),
-            (off_color,     str(s.offense_count)),
+            (f"fg:{th.accent}", "  ◆  "),
+            (st_color,          f"{icon} {s.status.value.upper()}"),
+            (DIM,               "  │  "),
+            (f"fg:{th.text}",   f'"{goal}"'),
+            (DIM,               "  │  "),
+            (bar_color,         bar),
+            (DIM,               f" {pct}  │  "),
+            (f"fg:{th.info}",   f"⏱ {time_str} left"),
+            (DIM,               "  │  elapsed "),
+            (MED,               elapsed_str),
+            (DIM,               "  │  "),
+            (mode_color,        s.mode.value),
+            (DIM,               "  │  ⚠ "),
+            (off_color,         str(s.offense_count)),
         ])
 
     def _refresh(self, message: str | None = None) -> None:
