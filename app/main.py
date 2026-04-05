@@ -71,7 +71,7 @@ def main() -> None:
         sa_path = _find_service_account(ROOT / "configs")
         ai = AI(
             api_key=api_key,
-            model=ai_cfg.get("model", "gemini-1.5-flash"),
+            model=ai_cfg.get("model", "gemini-2.5-flash"),
             service_account_path=sa_path,
             location=ai_cfg.get("location", "us-central1"),
         )

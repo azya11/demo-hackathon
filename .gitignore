@@ -8,3 +8,4 @@ data/*.db
 configs/*.json
 !configs/settings.json
 !configs/blocked_sites.json
+!configs/blocked_processes.json

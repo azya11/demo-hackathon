@@ -117,6 +117,7 @@ class Orchestrator:
         self._browser_launched = False
         self._chrome_process: subprocess.Popen | None = None
         self._tick_count = 0
+        self._ai_circuit_notified = False
 
     # --- session lifecycle ---
 
@@ -125,6 +126,12 @@ class Orchestrator:
             raise RuntimeError("a session is already active - /stop it first")
         self.session = Session(goal=goal, duration_minutes=duration_minutes, mode=mode)
         self.session.start()
+        self._ai_circuit_notified = False
+        if self.ai is not None:
+            self.ai.reset_cache()
+            self.ui.info(self.ai.status_line())
+        else:
+            self.ui.warn("AI judge not configured — rules-only enforcement")
         self._log(EventType.SESSION_STARTED, reason=f'"{goal}" for {duration_minutes}m ({mode.value})')
         self._start_tick_loop()
         return self.session
@@ -255,25 +262,49 @@ class Orchestrator:
         session = self.session
         if session is None or session.status != SessionStatus.ACTIVE:
             return
-        # Process scan first — fast, local, no network.
+        ai_available = (
+            self.ai is not None and self.ai.enabled and self.ai._error_count < 3
+        )
+        if (
+            self.ai is not None
+            and self.ai.enabled
+            and self.ai._error_count >= 3
+            and not self._ai_circuit_notified
+        ):
+            self.ui.error(
+                f"AI circuit-broken after 3 errors — last: {self.ai._last_error}"
+            )
+            self._ai_circuit_notified = True
+        # Rules-based process enforcement first (no AI, no network).
         if self.process_monitor is not None and self.process_monitor.available:
             for proc in self.process_monitor.scan_blocked():
                 self.tools.apply_process(proc, session)
-        if self.detector is None:
-            return
-        tabs = self.detector.list_tabs()
+        # Tabs get AI priority — they're the primary focus of the agent.
+        if self.detector is not None:
+            tabs = self.detector.list_tabs()
+        else:
+            tabs = []
         for ctx in tabs:
             if ctx.domain:
                 self._log(EventType.TAB_OBSERVED, url=ctx.url, domain=ctx.domain)
             decision = self.policy.decide(ctx, session)
+            # Re-check ai_available each iteration — circuit can trip mid-tick.
+            ai_up = (
+                self.ai is not None and self.ai.enabled and self.ai._error_count < 3
+            )
             # Ambiguous → ask AI (rules-first: AI only when rules don't match).
-            ai_available = self.ai is not None and self.ai.enabled and self.ai._error_count < 3
-            if decision.needs_ai and ai_available:
+            if decision.needs_ai and ai_up:
+                was_cached = f"tab::{ctx.url}" in self.ai._cache
                 ai_decision = self.ai.classify_tab(ctx, session.goal, [])
                 # Honor current mode — downgrade BLOCK to WARN in soft mode.
                 if ai_decision.action == Action.BLOCK and session.mode == SessionMode.SOFT:
                     ai_decision.action = Action.WARN
                 decision = ai_decision
+                if not was_cached:
+                    self.ui.info(
+                        f"AI {decision.action.value.upper()} "
+                        f"{ctx.domain or '(blank)'} — {decision.reason}"
+                    )
                 self._log(
                     EventType.AI_CLASSIFIED,
                     url=ctx.url,
@@ -284,6 +315,46 @@ class Orchestrator:
             if decision.action == Action.ALLOW:
                 continue
             self.tools.apply(decision, ctx, session)
+
+        # Agentic process judgment — runs LAST, throttled, so it never
+        # starves the tab classifier of quota.
+        if (
+            self.process_monitor is not None
+            and self.process_monitor.available
+            and self.ai is not None
+            and self.ai.enabled
+            and self.ai._error_count < 3
+        ):
+            self._ai_judge_processes(session, budget=2)
+
+    def _ai_judge_processes(self, session, budget: int) -> None:
+        """Ask AI about up to `budget` never-seen process names per tick."""
+        from app.session import SessionMode
+        candidates = self.process_monitor.scan_candidates()
+        by_name: dict[str, list] = {}
+        for proc in candidates:
+            by_name.setdefault(proc.name, []).append(proc)
+        spent = 0
+        for name, procs in by_name.items():
+            cached = f"proc::{name}" in self.ai._cache
+            if not cached:
+                if spent >= budget:
+                    continue
+                spent += 1
+            ai_decision = self.ai.classify_process(name, session.goal)
+            if ai_decision.action != Action.BLOCK:
+                continue
+            self._log(
+                EventType.AI_CLASSIFIED,
+                domain=name,
+                action=ai_decision.action.value,
+                reason=ai_decision.reason,
+            )
+            if session.mode == SessionMode.SOFT:
+                self.tools.apply_process(procs[0], session, reason=ai_decision.reason)
+                continue
+            for match in procs:
+                self.tools.apply_process(match, session, reason=ai_decision.reason)
 
     # --- internals ---
 
