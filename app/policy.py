@@ -5,8 +5,9 @@ Hard rules run first (explicit blocklist/allowlist). If the page is
 ambiguous, the decision is flagged `needs_ai=True` and the orchestrator
 hands off to ai.py for classification.
 
-Strict mode: any blocklist match → BLOCK immediately (close tab).
-Soft mode: any blocklist match → WARN (terminal push notification).
+Hardcore mode: any blocklist match → BLOCK immediately (close tab).
+Normal mode: any blocklist match → BLOCK with grace period in tools layer.
+Chill mode: any blocklist match → WARN (terminal push notification).
 """
 
 from __future__ import annotations
@@ -82,9 +83,9 @@ class Policy:
 
         for rule in blocklist:
             if _domain_matches(host, rule):
-                if session.mode == SessionMode.STRICT:
-                    return Decision(Action.BLOCK, f"{host} is blocked (strict)", 1.0)
-                return Decision(Action.WARN, f"{host} is blocked (soft)", 1.0)
+                if session.mode == SessionMode.CHILL:
+                    return Decision(Action.WARN, f"{host} is blocked (chill)", 1.0)
+                return Decision(Action.BLOCK, f"{host} is blocked ({session.mode.value})", 1.0)
 
         # Ambiguous — hand off to AI.
         return Decision(Action.ALLOW, "not in rules", 0.5, needs_ai=True)

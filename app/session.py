@@ -12,8 +12,9 @@ from itertools import count
 
 
 class SessionMode(str, Enum):
-    SOFT = "soft"      # warn only
-    STRICT = "strict"  # warn + close tab
+    CHILL = "chill"        # monitor only, never close
+    NORMAL = "normal"      # close after a grace period
+    HARDCORE = "hardcore"  # close immediately on detection
 
 
 class SessionStatus(str, Enum):
@@ -29,11 +30,12 @@ class Session:
 
     _id_counter = count(1)
 
-    def __init__(self, goal: str, duration_minutes: int, mode: SessionMode) -> None:
+    def __init__(self, goal: str, duration_minutes: int, mode: SessionMode, grace_seconds: int = 120) -> None:
         self.id: int = next(Session._id_counter)
         self.goal: str = goal
         self.duration: timedelta = timedelta(minutes=duration_minutes)
         self.mode: SessionMode = mode
+        self.grace_seconds: int = grace_seconds
         self.status: SessionStatus = SessionStatus.IDLE
         self.started_at: datetime | None = None
         self.ended_at: datetime | None = None
@@ -44,6 +46,11 @@ class Session:
         # Tracks which (tab, domain) pairs we've already counted as offenses,
         # so we don't re-count every tick the same blocked tab remains open.
         self._counted_offenses: set[tuple[str, str]] = set()
+        # Normal-mode grace tracking: first time we saw a blocked name.
+        self.grace_first_seen: dict[str, datetime] = {}
+        # Chill-mode monitoring: cumulative time each procrastination name appeared.
+        self.chill_last_seen: dict[str, datetime] = {}
+        self.chill_time: dict[str, timedelta] = {}
 
     # --- state transitions ---
 

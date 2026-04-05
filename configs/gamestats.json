@@ -52,5 +52,14 @@
     "avg_accuracy": 99.3,
     "best_accuracy": 100.0,
     "total_time": 26.7
+  },
+  {
+    "date": "2026-04-04 22:38",
+    "rounds": 1,
+    "avg_wpm": 36.3,
+    "best_wpm": 36.3,
+    "avg_accuracy": 100.0,
+    "best_accuracy": 100.0,
+    "total_time": 29.1
   }
 ]

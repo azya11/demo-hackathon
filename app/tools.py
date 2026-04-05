@@ -6,6 +6,8 @@ Every action the agent can take on the world. Kept separate so we can
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from app.models import Event, EventType
 from app.policy import Action
 
@@ -91,35 +93,96 @@ class Tools:
 
     def apply_process(self, proc_info, session, reason: str | None = None) -> None:
         """Run the blocked-process action for the current mode, with dedup."""
+        from datetime import datetime
         from app.session import SessionMode
         key_id = f"pid:{proc_info.pid}"
         is_new = session.should_count_offense(key_id, proc_info.name)
         if reason is None:
             reason = f"{proc_info.name} is blocked ({session.mode.value})"
-        if session.mode == SessionMode.STRICT:
+        if session.mode == SessionMode.HARDCORE:
             if is_new:
                 session.record_offense()
             self.kill_process(proc_info, session.id, reason)
             return
-        # soft mode
+        if session.mode == SessionMode.NORMAL:
+            first = session.grace_first_seen.get(proc_info.name)
+            now = datetime.now()
+            if first is None:
+                session.grace_first_seen[proc_info.name] = now
+                if is_new:
+                    session.record_offense()
+                grace_min = max(session.grace_seconds // 60, 0)
+                grace_sec = session.grace_seconds % 60
+                window = f"{grace_min}m{grace_sec}s" if grace_sec else f"{grace_min}m"
+                self.warn_process(
+                    proc_info, session.id,
+                    f"{reason} — closing in {window} unless you quit it",
+                )
+                return
+            if (now - first).total_seconds() >= session.grace_seconds:
+                self.kill_process(proc_info, session.id, f"{reason} — grace expired")
+                session.grace_first_seen.pop(proc_info.name, None)
+            return
+        # chill mode: monitor cumulative time, warn once
+        now = datetime.now()
+        last = session.chill_last_seen.get(proc_info.name)
+        if last is not None:
+            delta = now - last
+            if delta.total_seconds() < 15:
+                session.chill_time[proc_info.name] = (
+                    session.chill_time.get(proc_info.name, timedelta(0)) + delta
+                )
+        session.chill_last_seen[proc_info.name] = now
         if is_new:
             session.record_offense()
-            self.warn_process(proc_info, session.id, reason)
+            self.warn_process(proc_info, session.id, f"{reason} — chill mode, just watching")
 
     # --- dispatcher ---
 
     def apply(self, decision, context, session) -> None:
         """Execute whatever the Decision calls for."""
+        from datetime import datetime
+        from app.session import SessionMode
         if decision.action == Action.ALLOW:
             return
         tab_id = getattr(context, "target_id", None) or getattr(context, "url", "") or ""
         is_new = session.should_count_offense(tab_id, context.domain)
         if decision.action == Action.WARN:
+            # chill mode: monitor cumulative time on blocked domains
+            if context.domain:
+                now = datetime.now()
+                last = session.chill_last_seen.get(context.domain)
+                if last is not None:
+                    delta = now - last
+                    if delta.total_seconds() < 15:
+                        session.chill_time[context.domain] = (
+                            session.chill_time.get(context.domain, timedelta(0)) + delta
+                        )
+                session.chill_last_seen[context.domain] = now
             if is_new:
                 session.record_offense()
                 self.warn_user(decision.reason, session.id, context.url, context.domain)
             return
         if decision.action == Action.BLOCK:
+            if session.mode == SessionMode.NORMAL and context.domain:
+                first = session.grace_first_seen.get(context.domain)
+                now = datetime.now()
+                if first is None:
+                    session.grace_first_seen[context.domain] = now
+                    if is_new:
+                        session.record_offense()
+                    grace_min = max(session.grace_seconds // 60, 0)
+                    grace_sec = session.grace_seconds % 60
+                    window = f"{grace_min}m{grace_sec}s" if grace_sec else f"{grace_min}m"
+                    self.warn_user(
+                        f"{decision.reason} — closing in {window} unless you leave",
+                        session.id, context.url, context.domain,
+                    )
+                    return
+                if (now - first).total_seconds() >= session.grace_seconds:
+                    self.close_tab(context, session.id, f"{decision.reason} — grace expired")
+                    session.grace_first_seen.pop(context.domain, None)
+                return
             if is_new:
                 session.record_offense()
             self.close_tab(context, session.id, decision.reason)

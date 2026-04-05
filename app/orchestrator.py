@@ -7,6 +7,7 @@ Policy; on ambiguity it consults the AI. Tools execute the resulting Decision.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import socket
@@ -108,6 +109,9 @@ class Orchestrator:
         browser_mode: str = "launch",
         cdp_url: str = "http://localhost:9222",
         process_monitor=None,
+        grace_seconds: int = 120,
+        default_mode: SessionMode = SessionMode.NORMAL,
+        configs_dir=None,
     ) -> None:
         self.ui = ui
         self.policy = policy
@@ -120,6 +124,9 @@ class Orchestrator:
         self.browser_mode = browser_mode
         self.cdp_url = cdp_url
         self.process_monitor = process_monitor
+        self.grace_seconds = grace_seconds
+        self.default_mode = default_mode
+        self.configs_dir = configs_dir
         self.session: Session | None = None
         self.events: list[Event] = []
         self._thread: threading.Thread | None = None
@@ -134,7 +141,10 @@ class Orchestrator:
     def start_session(self, goal: str, duration_minutes: int, mode: SessionMode) -> Session:
         if self.session is not None and self.session.is_active():
             raise RuntimeError("a session is already active - /stop it first")
-        self.session = Session(goal=goal, duration_minutes=duration_minutes, mode=mode)
+        self.session = Session(
+            goal=goal, duration_minutes=duration_minutes, mode=mode,
+            grace_seconds=self.grace_seconds,
+        )
         self.session.start()
         self._ai_circuit_notified = False
         if self.ai is not None:
@@ -172,22 +182,38 @@ class Orchestrator:
         self.session.adjust_time(minutes)
         self._log(EventType.TIME_ADJUSTED, reason=label)
 
+    def set_grace(self, seconds: int) -> None:
+        self.grace_seconds = seconds
+        if self.session is not None:
+            self.session.grace_seconds = seconds
+        self._log(EventType.MODE_CHANGED, reason=f"grace set to {seconds}s")
+        self._save_settings()
+
     def set_mode(self, mode: SessionMode) -> None:
         self._require_session()
         assert self.session is not None
         self.session.mode = mode
+        # Also update default so the choice persists to next run.
+        self.default_mode = mode
         self._log(EventType.MODE_CHANGED, reason=f"mode set to {mode.value}")
+        self._save_settings()
+
+    def set_default_mode(self, mode: SessionMode) -> None:
+        self.default_mode = mode
+        self._save_settings()
 
     # --- block/allow passthrough ---
 
     def add_block(self, domain: str) -> str:
         d = self.policy.add_block(domain)
         self._log(EventType.MODE_CHANGED, reason=f"blocked {d}")
+        self._save_sites()
         return d
 
     def add_allow(self, domain: str) -> str:
         d = self.policy.add_allow(domain)
         self._log(EventType.MODE_CHANGED, reason=f"allowed {d}")
+        self._save_sites()
         return d
 
     def add_process_block(self, name: str) -> str:
@@ -195,6 +221,7 @@ class Orchestrator:
             raise RuntimeError("process monitor not available (install psutil)")
         n = self.process_monitor.add_block(name)
         self._log(EventType.MODE_CHANGED, reason=f"p-blocked {n}")
+        self._save_processes()
         return n
 
     def add_process_allow(self, name: str) -> str:
@@ -202,7 +229,55 @@ class Orchestrator:
             raise RuntimeError("process monitor not available (install psutil)")
         n = self.process_monitor.add_allow(name)
         self._log(EventType.MODE_CHANGED, reason=f"p-allowed {n}")
+        self._save_processes()
         return n
+
+    # --- persistence ---
+
+    def _save_settings(self) -> None:
+        if self.configs_dir is None:
+            return
+        path = self.configs_dir / "settings.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except Exception:
+            data = {}
+        data["default_mode"] = self.default_mode.value
+        data["normal_mode_grace_minutes"] = round(self.grace_seconds / 60, 2)
+        self._atomic_write(path, json.dumps(data, indent=2) + "\n")
+
+    def _save_sites(self) -> None:
+        if self.configs_dir is None:
+            return
+        data = {
+            "blocklist": self.policy.list_blocked(),
+            "allowlist": self.policy.list_allowed(),
+        }
+        self._atomic_write(
+            self.configs_dir / "blocked_sites.json",
+            json.dumps(data, indent=2) + "\n",
+        )
+
+    def _save_processes(self) -> None:
+        if self.configs_dir is None or self.process_monitor is None:
+            return
+        data = {
+            "blocklist": self.process_monitor.list_blocked(),
+            "allowlist": self.process_monitor.list_allowed(),
+        }
+        self._atomic_write(
+            self.configs_dir / "blocked_processes.json",
+            json.dumps(data, indent=2) + "\n",
+        )
+
+    @staticmethod
+    def _atomic_write(path, content: str) -> None:
+        try:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(content, encoding="utf-8")
+            os.replace(tmp, path)
+        except Exception:
+            pass
 
     # --- state queries ---
 
@@ -319,8 +394,8 @@ class Orchestrator:
             if decision.needs_ai and ai_up:
                 was_cached = f"tab::{ctx.url}" in self.ai._cache
                 ai_decision = self.ai.classify_tab(ctx, session.goal, [])
-                # Honor current mode — downgrade BLOCK to WARN in soft mode.
-                if ai_decision.action == Action.BLOCK and session.mode == SessionMode.SOFT:
+                # Honor current mode — downgrade BLOCK to WARN in chill mode.
+                if ai_decision.action == Action.BLOCK and session.mode == SessionMode.CHILL:
                     ai_decision.action = Action.WARN
                 decision = ai_decision
                 if not was_cached:
@@ -373,7 +448,7 @@ class Orchestrator:
                 action=ai_decision.action.value,
                 reason=ai_decision.reason,
             )
-            if session.mode == SessionMode.SOFT:
+            if session.mode == SessionMode.CHILL:
                 self.tools.apply_process(procs[0], session, reason=ai_decision.reason)
                 continue
             for match in procs:

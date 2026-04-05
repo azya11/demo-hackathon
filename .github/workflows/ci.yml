@@ -35,4 +35,4 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          printf '/help\n/status\n/start "Study OS" 2\n/status\n/pause\n/resume\n/mode soft\n/stop\n/quit\n' | python -m app.main
+          printf '/help\n/status\n/start "Study OS" 2\n/status\n/pause\n/resume\n/settings mode chill\n/stop\n/quit\n' | python -m app.main
