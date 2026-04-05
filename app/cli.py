@@ -20,6 +20,7 @@ import shlex
 from dataclasses import dataclass
 
 from app.session import SessionMode
+from app.typegame import TypingGame, load_all_stats
 
 
 @dataclass
@@ -46,6 +47,7 @@ class CLI:
             "resume": self._handle_resume,
             "mode": self._handle_mode,
             "help": self._handle_help,
+            "gamestats": self._handle_gamestats,
             "quit": self._handle_quit,
             "exit": self._handle_quit,
         }
@@ -114,6 +116,14 @@ class CLI:
     def _handle_pause(self, args: str) -> None:
         self.orchestrator.pause_session()
         self._refresh("Session paused.")
+        self.ui.info("Want to play the typing game while on break? [y/N]")
+        try:
+            answer = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer == "y":
+            TypingGame().run()
+            self._refresh("Welcome back! Session still paused.")
 
     def _handle_resume(self, args: str) -> None:
         self.orchestrator.resume_session()
@@ -126,6 +136,11 @@ class CLI:
 
     def _handle_help(self, args: str) -> None:
         self.ui.render_help()
+
+    def _handle_gamestats(self, args: str) -> None:
+        self.ui.render_gamestats(load_all_stats())
+        input("\nPress Enter to return...")
+        self._refresh()
 
     def _handle_quit(self, args: str) -> None:
         self.ui.info("bye")

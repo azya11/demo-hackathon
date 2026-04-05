@@ -1,0 +1,56 @@
+[
+  {
+    "date": "2026-04-04 21:29",
+    "rounds": 4,
+    "avg_wpm": 57.3,
+    "best_wpm": 65.4,
+    "avg_accuracy": 95.2,
+    "best_accuracy": 98.6,
+    "total_time": 57.2
+  },
+  {
+    "date": "2026-04-04 21:32",
+    "rounds": 2,
+    "avg_wpm": 137.9,
+    "best_wpm": 229.2,
+    "avg_accuracy": 59.8,
+    "best_accuracy": 98.3,
+    "total_time": 19.6
+  },
+  {
+    "date": "2026-04-04 21:34",
+    "rounds": 3,
+    "avg_wpm": 355.3,
+    "best_wpm": 944.9,
+    "avg_accuracy": 65.9,
+    "best_accuracy": 97.2,
+    "total_time": 26.6
+  },
+  {
+    "date": "2026-04-04 21:35",
+    "rounds": 2,
+    "avg_wpm": 53.1,
+    "best_wpm": 64.2,
+    "avg_accuracy": 99.3,
+    "best_accuracy": 100.0,
+    "total_time": 39.0
+  },
+  {
+    "date": "2026-04-04 21:39",
+    "rounds": 3,
+    "avg_wpm": 290.3,
+    "best_wpm": 722.2,
+    "avg_accuracy": 59.8,
+    "best_accuracy": 95.3,
+    "total_time": 15.4
+  },
+  {
+    "date": "2026-04-04 21:40",
+    "rounds": 2,
+    "avg_wpm": 57.7,
+    "best_wpm": 59.8,
+    "avg_accuracy": 99.3,
+    "best_accuracy": 100.0,
+    "total_time": 26.7
+  }
+]

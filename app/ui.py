@@ -110,6 +110,64 @@ class UI:
         )
         self.console.print(Panel(body, title="Session Summary", border_style="blue"))
 
+    def render_gamestats(self, sessions: list) -> None:
+        self.console.clear()
+        self._print_header()
+        if not sessions:
+            self.console.print(Panel.fit(
+                "No game sessions recorded yet. Play the typing game with [medium_purple1]/pause[/medium_purple1].",
+                border_style="dim",
+            ))
+            return
+
+        # All-time bests
+        best_wpm = max(s["best_wpm"] for s in sessions)
+        best_acc = max(s["best_accuracy"] for s in sessions)
+        all_avg_wpm = round(sum(s["avg_wpm"] for s in sessions) / len(sessions), 1)
+        all_avg_acc = round(sum(s["avg_accuracy"] for s in sessions) / len(sessions), 1)
+        total_rounds = sum(s["rounds"] for s in sessions)
+
+        def wpm_color(v: float) -> str:
+            return "green" if v >= 60 else "yellow" if v >= 30 else "red"
+
+        def acc_color(v: float) -> str:
+            return "green" if v >= 95 else "yellow" if v >= 80 else "red"
+
+        summary = (
+            f"[bold]Sessions played:[/bold] {len(sessions)}\n"
+            f"[bold]Total rounds:[/bold]    {total_rounds}\n"
+            f"[bold]All-time best WPM:[/bold]      [{wpm_color(best_wpm)}]{best_wpm}[/]\n"
+            f"[bold]All-time best accuracy:[/bold] [{acc_color(best_acc)}]{best_acc}%[/]\n"
+            f"[bold]Overall avg WPM:[/bold]        [{wpm_color(all_avg_wpm)}]{all_avg_wpm}[/]\n"
+            f"[bold]Overall avg accuracy:[/bold]   [{acc_color(all_avg_acc)}]{all_avg_acc}%[/]"
+        )
+        self.console.print(Panel(summary, title="[bold medium_purple1]Typing Game - All Time[/bold medium_purple1]", border_style="medium_purple1"))
+        self.console.print()
+
+        # Per-session history table
+        table = Table(title="Session History", header_style="bold medium_purple1", border_style="dim")
+        table.add_column("#", style="dim", no_wrap=True)
+        table.add_column("Date", no_wrap=True)
+        table.add_column("Rounds")
+        table.add_column("Avg WPM")
+        table.add_column("Best WPM")
+        table.add_column("Avg Acc")
+        table.add_column("Best Acc")
+        table.add_column("Time")
+
+        for i, s in enumerate(sessions[-20:], 1):
+            table.add_row(
+                str(i),
+                s["date"],
+                str(s["rounds"]),
+                f"[{wpm_color(s['avg_wpm'])}]{s['avg_wpm']}[/]",
+                f"[{wpm_color(s['best_wpm'])}]{s['best_wpm']}[/]",
+                f"[{acc_color(s['avg_accuracy'])}]{s['avg_accuracy']}%[/]",
+                f"[{acc_color(s['best_accuracy'])}]{s['best_accuracy']}%[/]",
+                f"{s['total_time']}s",
+            )
+        self.console.print(table)
+
     def render_help(self) -> None:
         self.console.clear()
         self._print_header()
@@ -120,9 +178,10 @@ class UI:
             ('/start "goal" <min>', "Begin a focus session"),
             ("/status", "Show current session state"),
             ("/stop", "End current session"),
-            ("/pause", "Pause session timer"),
+            ("/pause", "Pause session timer (offers typing game)"),
             ("/resume", "Resume after pause"),
             ("/mode strict|soft", "Switch enforcement mode"),
+            ("/gamestats", "Show typing game statistics"),
             ("/help", "Show this help"),
             ("/quit", "Exit app"),
         ]
