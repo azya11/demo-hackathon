@@ -71,12 +71,16 @@ class Tools:
         """Execute whatever the Decision calls for."""
         if decision.action == Action.ALLOW:
             return
+        tab_id = getattr(context, "target_id", None) or getattr(context, "url", "") or ""
+        is_new = session.should_count_offense(tab_id, context.domain)
         if decision.action == Action.WARN:
-            session.record_offense()
-            self.warn_user(decision.reason, session.id, context.url, context.domain)
+            if is_new:
+                session.record_offense()
+                self.warn_user(decision.reason, session.id, context.url, context.domain)
             return
         if decision.action == Action.BLOCK:
-            session.record_offense()
+            if is_new:
+                session.record_offense()
             self.close_tab(context, session.id, decision.reason)
             return
 

@@ -85,6 +85,9 @@ class AI:
         """Return a Decision. Always returns ALLOW on any failure."""
         if not self._enabled:
             return Decision(Action.ALLOW, "ai disabled", 0.0)
+        # Circuit breaker: after 3 consecutive errors, stay quiet for the rest of the session.
+        if self._error_count >= 3:
+            return Decision(Action.ALLOW, "ai circuit-broken", 0.0)
         prompt = (
             self._prompt_template
             .replace("{{goal}}", goal or "")

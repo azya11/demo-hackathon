@@ -242,7 +242,8 @@ class Orchestrator:
                 self._log(EventType.TAB_OBSERVED, url=ctx.url, domain=ctx.domain)
             decision = self.policy.decide(ctx, session)
             # Ambiguous → ask AI (rules-first: AI only when rules don't match).
-            if decision.needs_ai and self.ai is not None and self.ai.enabled:
+            ai_available = self.ai is not None and self.ai.enabled and self.ai._error_count < 3
+            if decision.needs_ai and ai_available:
                 ai_decision = self.ai.classify_tab(ctx, session.goal, [])
                 # Honor current mode — downgrade BLOCK to WARN in soft mode.
                 if ai_decision.action == Action.BLOCK and session.mode == SessionMode.SOFT:
