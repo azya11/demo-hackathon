@@ -400,19 +400,12 @@ class UI:
         table.add_column("Description", style=_TEXT)
 
         rows = [
-            ('/start "goal" <min>', "Begin a focus session  [dim][mode][/dim]"),
+            ('/start ["goal" <min>]', "Begin a focus session  [dim](default: study 60m)[/dim]"),
             ("/status",             "Show current session state"),
             ("/stop",               "End current session"),
             ("/pause",              "Pause session timer (offers typing game)"),
             ("/resume",             "Resume after pause"),
-            ("/mode strict|soft",   "Switch enforcement mode"),
-            ("/time +20 | -10 | 45","Add, remove, or set session time"),
-            ("/block <domain>",     "Block a site during the session"),
-            ("/allow <domain>",     "Remove a site from the blocklist"),
-            ("/blocks",             "Show blocked and allowed sites"),
-            ("/pblock <process>",   "Block a process during the session"),
-            ("/pallow <process>",   "Remove a process from the blocklist"),
-            ("/pblocks",            "Show blocked and allowed processes"),
+            ("/settings",           "Open interactive settings (mode, grace, blocks, ...)"),
             ("/gamestats",          "Show typing game statistics"),
             ("/help",               "Show this help"),
             ("/clear",              "Clear screen and redraw"),
@@ -509,7 +502,7 @@ class UI:
         badge.append(status_val.upper(), style=f"bold {color}")
 
         # Mode pill
-        mode_color = _RED if session.mode.value == "strict" else _TEAL
+        mode_color = {"hardcore": _RED, "normal": _YELLOW, "chill": _TEAL}.get(session.mode.value, _TEXT)
         mode_badge = Text()
         mode_badge.append(f" {session.mode.value} ", style=f"bold {mode_color}")
 

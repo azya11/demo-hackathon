@@ -17,8 +17,16 @@ from app.detector import Detector
 from app.orchestrator import Orchestrator
 from app.policy import Policy
 from app.process_monitor import ProcessMonitor
+from app.session import SessionMode
 from app.tools import Tools
 from app.ui import UI
+
+
+def _parse_default_mode(raw: str) -> SessionMode:
+    try:
+        return SessionMode((raw or "normal").strip().lower())
+    except ValueError:
+        return SessionMode.NORMAL
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -95,6 +103,9 @@ def main() -> None:
         browser_mode=browser_cfg.get("mode", "launch"),
         cdp_url=browser_cfg.get("cdp_url", "http://localhost:9222"),
         process_monitor=process_monitor,
+        grace_seconds=int(float(settings.get("normal_mode_grace_minutes", 2)) * 60),
+        default_mode=_parse_default_mode(settings.get("default_mode", "normal")),
+        configs_dir=ROOT / "configs",
     )
     # Share the orchestrator's event log with tools so warn/close events land there.
     orchestrator.events = events

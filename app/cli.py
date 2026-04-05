@@ -9,7 +9,7 @@ Commands:
     /status                        Show current session state
     /pause                         Pause session timer + enforcement
     /resume                        Resume after pause
-    /mode strict|soft              Switch enforcement mode
+    /settings                      Open interactive settings menu
     /help                          List commands
     /clear                         Clear screen and redraw
     /quit                          Exit app
@@ -24,14 +24,113 @@ import time as _time
 from dataclasses import dataclass
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.application import get_app
+from prompt_toolkit.application import Application, get_app
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
+
+def _arrow_select(
+    title: str,
+    items: list[tuple[str, str]],
+    get_inline=None,
+    on_cycle=None,
+) -> int | None:
+    """Display an arrow-navigable menu. Returns selected index or None if cancelled.
+
+    items: list of (name, description) tuples.
+    get_inline(name) -> str|None: optional inline value shown next to the name.
+    on_cycle(name, direction) -> bool: called on left/right; return True if handled.
+    """
+    import sys
+    if not sys.stdin.isatty() or not items:
+        return None
+
+    state = {"idx": 0}
+
+    def _render():
+        lines: list[tuple[str, str]] = []
+        lines.append(("fg:#cba6f7 bold", f"  {title}\n\n"))
+        for i, (name, desc) in enumerate(items):
+            inline = get_inline(name) if get_inline else None
+            is_sel = i == state["idx"]
+            cyclable = on_cycle is not None and inline is not None
+            if is_sel:
+                lines.append(("fg:#cba6f7 bold", "  \u276f "))
+                lines.append(("fg:#cdd6f4 bold", f"{name:<10}"))
+            else:
+                lines.append(("", "    "))
+                lines.append(("fg:#6c7086", f"{name:<10}"))
+            if inline is not None:
+                if is_sel and cyclable:
+                    lines.append(("fg:#6c7086", " \u2039 "))
+                    lines.append(("fg:#94e2d5 bold", inline))
+                    lines.append(("fg:#6c7086", " \u203a"))
+                else:
+                    lines.append(("fg:#6c7086", "  "))
+                    lines.append(("fg:#94e2d5" if is_sel else "fg:#585b70", inline))
+            if is_sel:
+                lines.append(("fg:#a6adc8", f"   {desc}\n"))
+            else:
+                lines.append(("", "\n"))
+        return lines
+
+    kb = KeyBindings()
+
+    @kb.add("up")
+    @kb.add("k")
+    @kb.add("c-p")
+    def _(event):
+        state["idx"] = (state["idx"] - 1) % len(items)
+
+    @kb.add("down")
+    @kb.add("j")
+    @kb.add("c-n")
+    def _(event):
+        state["idx"] = (state["idx"] + 1) % len(items)
+
+    @kb.add("left")
+    @kb.add("h")
+    def _(event):
+        if on_cycle is not None:
+            on_cycle(items[state["idx"]][0], -1)
+
+    @kb.add("right")
+    @kb.add("l")
+    def _(event):
+        if on_cycle is not None:
+            on_cycle(items[state["idx"]][0], +1)
+
+    @kb.add("enter")
+    def _(event):
+        event.app.exit(result=state["idx"])
+
+    @kb.add("escape", eager=True)
+    @kb.add("q")
+    @kb.add("c-c")
+    @kb.add("c-d")
+    def _(event):
+        event.app.exit(result=None)
+
+    control = FormattedTextControl(_render, focusable=True, show_cursor=False)
+    window = Window(control, height=len(items) + 3, always_hide_cursor=True)
+    app = Application(
+        layout=Layout(HSplit([window])),
+        key_bindings=kb,
+        full_screen=False,
+        mouse_support=False,
+    )
+    try:
+        return app.run()
+    except Exception:
+        return None
+
 
 class _SlashLexer(Lexer):
     def lex_document(self, document):
@@ -80,50 +179,34 @@ from app.models import EventType
 from app.session import SessionMode
 from app.typegame import TypingGame, load_all_stats
 
-_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "time", "block", "allow", "blocks", "pblock", "pallow", "pblocks", "help", "clear", "quit"]
-_MODE_ARGS = ["strict", "soft"]
+_COMMANDS = ["start", "stop", "status", "pause", "resume", "settings", "help", "clear", "quit"]
+_MODE_ARGS = ["chill", "normal", "hardcore"]
 _ALERT_THRESHOLDS = [60, 30, 10, 5, 1]  # minutes
 
 _COMMAND_META = {
-    "start":   "begin a focus session  /start \"goal\" <min>",
-    "stop":    "end current session",
-    "status":  "show current session state",
-    "pause":   "pause session timer",
-    "resume":  "resume after pause",
-    "mode":    "switch enforcement mode  strict|soft",
-    "time":    "adjust time  +20 | -10 | 45",
-    "block":   "block a site  /block twitter.com",
-    "allow":   "allow a site  /allow twitter.com",
-    "blocks":  "show blocked/allowed sites",
-    "pblock":  "block a process  /pblock spotify.exe",
-    "pallow":  "allow a process  /pallow spotify.exe",
-    "pblocks": "show blocked/allowed processes",
-    "help":    "show all commands",
-    "clear":   "clear the screen",
-    "quit":    "exit app",
-    "exit":    "exit app",
+    "start":    "begin a focus session  /start [\"goal\" <min>]",
+    "stop":     "end current session",
+    "status":   "show current session state",
+    "pause":    "pause session timer",
+    "resume":   "resume after pause",
+    "settings": "view/edit all settings (mode, grace, time, blocks, ...)",
+    "help":     "show all commands",
+    "clear":    "clear the screen",
+    "quit":     "exit app",
+    "exit":     "exit app",
 }
 
 _MODE_META = {
-    "strict": "warn + close tab",
-    "soft":   "warn only",
+    "chill":    "monitor only, never close",
+    "normal":   "close after grace period",
+    "hardcore": "close immediately",
 }
 
 
 class _SlashCompleter(Completer):
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor.lstrip()
-        if text.startswith("/mode "):
-            typed = text[len("/mode "):]
-            for m in _MODE_ARGS:
-                if m.startswith(typed):
-                    yield Completion(
-                        "/mode " + m,
-                        start_position=-len(text),
-                        display=FormattedText([("bold", "/mode "), ("", m)]),
-                        display_meta=FormattedText([("fg:#6c7086", _MODE_META.get(m, ""))]),
-                    )
-        elif text.startswith("/"):
+        if text.startswith("/"):
             typed = text[1:]
             if " " in typed:  # already past the command name
                 return
@@ -179,14 +262,7 @@ class CLI:
             "status": self._handle_status,
             "pause": self._handle_pause,
             "resume": self._handle_resume,
-            "mode": self._handle_mode,
-            "time": self._handle_time,
-            "block": self._handle_block,
-            "allow": self._handle_allow,
-            "blocks": self._handle_blocks,
-            "pblock": self._handle_pblock,
-            "pallow": self._handle_pallow,
-            "pblocks": self._handle_pblocks,
+            "settings": self._handle_settings,
             "help": self._handle_help,
             "gamestats": self._handle_gamestats,
             "clear": self._handle_clear,
@@ -237,16 +313,26 @@ class CLI:
 
     def _handle_start(self, args: str) -> None:
         parts = shlex.split(args) if args else []
-        if len(parts) < 2:
-            raise ValueError('usage: /start "<goal>" <minutes> [mode]')
-        goal = parts[0]
-        try:
-            minutes = int(parts[1])
-        except ValueError:
-            raise ValueError("minutes must be an integer")
+        if len(parts) == 0:
+            goal = "study"
+            minutes = 60
+        elif len(parts) == 1:
+            # could be just a goal, or just a number — if it parses as int, treat as minutes
+            try:
+                minutes = int(parts[0])
+                goal = "study"
+            except ValueError:
+                goal = parts[0]
+                minutes = 60
+        else:
+            goal = parts[0]
+            try:
+                minutes = int(parts[1])
+            except ValueError:
+                raise ValueError("minutes must be an integer")
         if minutes <= 0:
             raise ValueError("minutes must be positive")
-        mode = self._parse_mode(parts[2]) if len(parts) > 2 else SessionMode.STRICT
+        mode = self._parse_mode(parts[2]) if len(parts) > 2 else self.orchestrator.default_mode
         self.orchestrator.start_session(goal, minutes, mode)
         self._fired_alerts.clear()
         self._prefill_alerts()
@@ -277,7 +363,11 @@ class CLI:
 
     def _handle_mode(self, args: str) -> None:
         mode = self._parse_mode(args.strip())
-        self.orchestrator.set_mode(mode)
+        s = self.orchestrator.session
+        if s is not None and s.is_active():
+            self.orchestrator.set_mode(mode)
+        else:
+            self.orchestrator.set_default_mode(mode)
         self._refresh(f"Mode set to {mode.value}.")
 
     def _handle_block(self, args: str) -> None:
@@ -357,6 +447,197 @@ class CLI:
             self._fired_alerts.clear()
             self._prefill_alerts()
             self.ui.agent_say(f"Time set to {new_mins} minutes from now.")
+
+    def _handle_settings(self, args: str) -> None:
+        # One-shot form: /settings <sub> <args...>
+        parts = args.strip().split(None, 1)
+        if parts:
+            sub = parts[0].lower()
+            rest = parts[1] if len(parts) > 1 else ""
+            self._settings_dispatch(sub, rest)
+            return
+        # Interactive form: /settings with no args → menu loop.
+        self._settings_menu()
+
+    def _settings_dispatch(self, sub: str, rest: str) -> None:
+        dispatch = {
+            "mode":    self._handle_mode,
+            "time":    self._handle_time,
+            "block":   self._handle_block,
+            "allow":   self._handle_allow,
+            "blocks":  self._handle_blocks,
+            "pblock":  self._handle_pblock,
+            "pallow":  self._handle_pallow,
+            "pblocks": self._handle_pblocks,
+        }
+        if sub == "grace":
+            self._settings_set_grace(rest)
+            return
+        if sub not in dispatch:
+            raise ValueError(
+                "options: mode|time|block|allow|blocks|pblock|pallow|pblocks|grace"
+            )
+        dispatch[sub](rest)
+
+    def _settings_set_grace(self, raw: str) -> None:
+        raw = raw.strip()
+        if not raw:
+            self.ui.info(f"grace: {self.orchestrator.grace_seconds}s (normal mode)")
+            return
+        try:
+            mins = float(raw)
+        except ValueError:
+            raise ValueError("usage: grace <minutes>")
+        if mins < 0:
+            raise ValueError("grace must be >= 0")
+        self.orchestrator.set_grace(int(mins * 60))
+        self.ui.agent_say(f"Grace period set to {mins}m.")
+
+    def _settings_menu(self) -> None:
+        items = [
+            ("mode",    "enforcement mode (←/→ to switch)"),
+            ("grace",   "normal-mode grace period (←/→ to switch)"),
+            ("time",    "adjust session time (+20 | -10 | 45)"),
+            ("block",   "block a site"),
+            ("allow",   "allow a site"),
+            ("blocks",  "show blocked/allowed sites"),
+            ("pblock",  "block a process"),
+            ("pallow",  "allow a process"),
+            ("pblocks", "show blocked/allowed processes"),
+        ]
+        mode_values = ["chill", "normal", "hardcore"]
+        grace_values = [2, 5, 10, 15]  # minutes
+
+        def _get_inline(name: str) -> str | None:
+            o = self.orchestrator
+            s = o.session
+            if name == "mode":
+                return (s.mode.value if s else o.default_mode.value)
+            if name == "grace":
+                return f"{o.grace_seconds // 60}m"
+            return None
+
+        def _on_cycle(name: str, direction: int) -> None:
+            o = self.orchestrator
+            if name == "mode":
+                s = o.session
+                cur = (s.mode.value if s else o.default_mode.value)
+                try:
+                    i = mode_values.index(cur)
+                except ValueError:
+                    i = 0
+                new_val = mode_values[(i + direction) % len(mode_values)]
+                try:
+                    new_mode = SessionMode(new_val)
+                except ValueError:
+                    return
+                if s is not None and s.is_active():
+                    try:
+                        o.set_mode(new_mode)
+                    except Exception:
+                        pass
+                else:
+                    o.set_default_mode(new_mode)
+                return
+            if name == "grace":
+                cur_min = max(o.grace_seconds // 60, 0)
+                # snap to nearest preset, then cycle
+                try:
+                    i = grace_values.index(cur_min)
+                except ValueError:
+                    # not on a preset — pick the closest
+                    i = min(
+                        range(len(grace_values)),
+                        key=lambda k: abs(grace_values[k] - cur_min),
+                    )
+                new_min = grace_values[(i + direction) % len(grace_values)]
+                o.set_grace(new_min * 60)
+                return
+
+        while True:
+            self.ui._clear()
+            idx = _arrow_select(
+                "Settings  (↑/↓ move · ←/→ cycle · Enter select · Esc exit)",
+                items,
+                get_inline=_get_inline,
+                on_cycle=_on_cycle,
+            )
+            if idx is None:
+                self._settings_save_all()
+                break
+            name = items[idx][0]
+            # Mode/grace are cycled with ←/→ — Enter here confirms & exits.
+            if name in ("mode", "grace"):
+                self._settings_save_all()
+                self.ui.agent_say("Settings saved.")
+                break
+            # Display-only actions: show the list and wait for Enter.
+            if name in ("blocks", "pblocks"):
+                try:
+                    self._settings_dispatch(name, "")
+                except Exception as e:
+                    self.ui.error(str(e))
+                try:
+                    input("  (press Enter to continue) ")
+                except (EOFError, KeyboardInterrupt):
+                    pass
+                continue
+            arg = self._settings_prompt_for(name)
+            if arg is None:
+                continue
+            try:
+                self._settings_dispatch(name, arg)
+            except Exception as e:
+                self.ui.error(str(e))
+
+    def _settings_save_all(self) -> None:
+        o = self.orchestrator
+        try:
+            o._save_settings()
+            o._save_sites()
+            o._save_processes()
+        except Exception as e:
+            self.ui.error(f"failed to save settings: {e}")
+
+    def _settings_prompt_for(self, name: str) -> str | None:
+        prompts = {
+            "mode":    "new mode (chill|normal|hardcore): ",
+            "grace":   "grace period in minutes: ",
+            "time":    "time change (+20 | -10 | 45): ",
+            "block":   "domain to block: ",
+            "allow":   "domain to allow: ",
+            "pblock":  "process name (e.g. spotify.exe): ",
+            "pallow":  "process name to allow: ",
+        }
+        if name in ("blocks", "pblocks"):
+            return ""  # no arg needed
+        try:
+            val = input(prompts.get(name, f"{name}: ")).strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        if not val:
+            self.ui.info("(skipped)")
+            return None
+        return val
+
+    def _render_settings(self) -> None:
+        o = self.orchestrator
+        s = o.session
+        self.ui.info(f"mode:    {s.mode.value if s else o.default_mode.value} (default {o.default_mode.value})")
+        self.ui.info(f"grace:   {o.grace_seconds}s (normal mode)")
+        if s is not None:
+            rem = int(s.time_remaining().total_seconds() // 60)
+            self.ui.info(f"time:    {rem}m remaining of {int(s.duration.total_seconds()//60)}m")
+        else:
+            self.ui.info("time:    no active session")
+        blocked = o.policy.list_blocked()
+        allowed = o.policy.list_allowed()
+        self.ui.info(f"sites blocked ({len(blocked)}): {', '.join(blocked) or '(none)'}")
+        self.ui.info(f"sites allowed ({len(allowed)}): {', '.join(allowed) or '(none)'}")
+        pm = o.process_monitor
+        if pm is not None:
+            self.ui.info(f"procs blocked ({len(pm.list_blocked())}): {', '.join(pm.list_blocked()) or '(none)'}")
+            self.ui.info(f"procs allowed ({len(pm.list_allowed())}): {', '.join(pm.list_allowed()) or '(none)'}")
 
     def _handle_help(self, args: str) -> None:
         self.ui.render_help()
@@ -460,7 +741,7 @@ class CLI:
         icons  = {"active": "▶", "paused": "⏸", "stopped": "■", "completed": "✓", "idle": "○"}
         st_color   = colors.get(s.status.value, "fg:#cdd6f4")
         icon       = icons.get(s.status.value, "●")
-        mode_color = "fg:#f38ba8" if s.mode.value == "strict" else "fg:#94e2d5"
+        mode_color = {"hardcore": "fg:#f38ba8", "normal": "fg:#f9e2af", "chill": "fg:#94e2d5"}.get(s.mode.value, "fg:#cdd6f4")
         off_color  = "fg:#a6e3a1" if s.offense_count == 0 else ("fg:#f9e2af" if s.offense_count < 3 else "fg:#f38ba8")
         goal = s.goal if len(s.goal) <= 28 else s.goal[:26] + "..."
         pct  = f"{int(frac * 100):3d}%"
@@ -495,8 +776,8 @@ class CLI:
     def _parse_mode(raw: str) -> SessionMode:
         raw = raw.strip().lower()
         if not raw:
-            raise ValueError("usage: /mode strict|soft")
+            raise ValueError("usage: /mode chill|normal|hardcore")
         try:
             return SessionMode(raw)
         except ValueError:
-            raise ValueError(f"mode must be 'strict' or 'soft' (got '{raw}')")
+            raise ValueError(f"mode must be 'chill', 'normal', or 'hardcore' (got '{raw}')")

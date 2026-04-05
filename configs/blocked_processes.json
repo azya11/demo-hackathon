@@ -1,19 +1,19 @@
 {
   "blocklist": [
-    "discord.exe",
-    "steam.exe",
     "epicgameslauncher.exe",
     "riotclientservices.exe",
-    "telegram.exe",
-    "whatsapp.exe",
     "slack.exe",
-    "spotify.exe"
+    "spotify.exe",
+    "steam.exe",
+    "telegram.exe",
+    "whatsapp.exe"
   ],
   "allowlist": [
     "code.exe",
     "devenv.exe",
-    "pycharm64.exe",
+    "discord.exe",
+    "notepad++.exe",
     "notepad.exe",
-    "notepad++.exe"
+    "pycharm64.exe"
   ]
 }
