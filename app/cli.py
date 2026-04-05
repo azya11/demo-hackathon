@@ -495,19 +495,22 @@ class CLI:
 
     def _settings_menu(self) -> None:
         items = [
-            ("theme",   "color theme (←/→ to switch)"),
-            ("mode",    "enforcement mode (←/→ to switch)"),
-            ("grace",   "normal-mode grace period (←/→ to switch)"),
-            ("time",    "adjust session time (+20 | -10 | 45)"),
-            ("block",   "block a site"),
-            ("allow",   "allow a site"),
-            ("blocks",  "show blocked/allowed sites"),
-            ("pblock",  "block a process"),
-            ("pallow",  "allow a process"),
-            ("pblocks", "show blocked/allowed processes"),
+            ("theme",          "color theme (←/→ to switch)"),
+            ("mode",           "enforcement mode (←/→ to switch)"),
+            ("grace",          "normal-mode grace period (←/→ to switch)"),
+            ("coach",          "AI focus coach (←/→ on/off)"),
+            ("coach_interval", "coach check-in interval (←/→ to switch)"),
+            ("time",           "adjust session time (+20 | -10 | 45)"),
+            ("block",          "block a site"),
+            ("allow",          "allow a site"),
+            ("blocks",         "show blocked/allowed sites"),
+            ("pblock",         "block a process"),
+            ("pallow",         "allow a process"),
+            ("pblocks",        "show blocked/allowed processes"),
         ]
         mode_values = ["chill", "normal", "hardcore"]
         grace_values = [2, 5, 10, 15]  # minutes
+        coach_interval_values = [2, 5, 10, 30, 60]  # minutes
 
         import app.themes as _themes
 
@@ -520,6 +523,10 @@ class CLI:
                 return (s.mode.value if s else o.default_mode.value)
             if name == "grace":
                 return f"{o.grace_seconds // 60}m"
+            if name == "coach":
+                return "on" if o.coach_enabled else "off"
+            if name == "coach_interval":
+                return f"{o.coach_interval_minutes}m"
             return None
 
         def _on_cycle(name: str, direction: int) -> None:
@@ -562,6 +569,16 @@ class CLI:
                 new_min = grace_values[(i + direction) % len(grace_values)]
                 o.set_grace(new_min * 60)
                 return
+            if name == "coach":
+                o.coach_enabled = not o.coach_enabled
+                return
+            if name == "coach_interval":
+                try:
+                    i = coach_interval_values.index(o.coach_interval_minutes)
+                except ValueError:
+                    i = 2  # default to 10m
+                o.coach_interval_minutes = coach_interval_values[(i + direction) % len(coach_interval_values)]
+                return
 
         while True:
             self.ui._clear()
@@ -576,8 +593,8 @@ class CLI:
                 self._refresh()
                 return
             name = items[idx][0]
-            # Theme/mode/grace are cycled with ←/→ — Enter confirms & exits.
-            if name in ("theme", "mode", "grace"):
+            # Cycled settings — Enter confirms & exits.
+            if name in ("theme", "mode", "grace", "coach", "coach_interval"):
                 self._settings_save_all()
                 self._refresh("Settings saved.")
                 return

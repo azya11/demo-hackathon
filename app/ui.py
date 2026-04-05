@@ -515,3 +515,21 @@ class UI:
                 padding=(0, 1),
             )
         )
+
+    def render_coach_panel(self, text: str, label: str = "mid-session check-in") -> None:
+        """Display an AI focus coach review in a themed panel."""
+        body = Text(text, style=_t().text)
+        title_txt = Text(" AI Focus Coach ", style=f"bold {_t().accent2}")
+        sub_txt = Text(f" {label} ", style=_t().dim)
+        self.console.print()
+        self.console.print(
+            Panel(
+                body,
+                title=title_txt,
+                subtitle=sub_txt,
+                border_style=_t().accent2,
+                box=box.ROUNDED,
+                padding=(1, 3),
+            )
+        )
+        self.console.print()

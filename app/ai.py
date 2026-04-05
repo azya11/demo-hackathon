@@ -151,6 +151,44 @@ class AI:
             self._cache[cache_key] = decision
         return decision
 
+    def focus_coach_review(
+        self,
+        goal: str,
+        mode: str,
+        duration_minutes: int,
+        elapsed_minutes: float,
+        offenses: int,
+        blocked_domains: list[str],
+        events_summary: str,
+        is_final: bool = False,
+    ) -> str:
+        """Ask Gemini for a personalized focus coaching review. Returns plain text."""
+        if not self._enabled:
+            return ""
+        prompt_path = _PROMPTS_DIR / "focus_coach.txt"
+        try:
+            template = prompt_path.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+        review_type = "final session review" if is_final else "mid-session check-in"
+        domains_str = ", ".join(blocked_domains[:10]) if blocked_domains else "none"
+        prompt = (
+            template
+            .replace("{{goal}}", goal or "")
+            .replace("{{mode}}", mode or "")
+            .replace("{{duration}}", str(int(duration_minutes)))
+            .replace("{{elapsed}}", f"{elapsed_minutes:.0f}")
+            .replace("{{offenses}}", str(offenses))
+            .replace("{{blocked_domains}}", domains_str)
+            .replace("{{events_summary}}", events_summary or "no events logged")
+            .replace("{{review_type}}", review_type)
+        )
+        try:
+            return self._generate(prompt).strip()
+        except Exception as e:
+            self._last_error = f"{type(e).__name__}: {e}"
+            return ""
+
     def _call_and_parse(self, prompt: str) -> Decision:
         try:
             text = self._generate(prompt)

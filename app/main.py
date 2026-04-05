@@ -118,6 +118,9 @@ def main() -> None:
     # Share the orchestrator's event log with tools so warn/close events land there.
     orchestrator.events = events
 
+    orchestrator.coach_enabled = bool(settings.get("coach_enabled", True))
+    orchestrator.coach_interval_minutes = int(settings.get("coach_interval_minutes", 10))
+
     cli = CLI(orchestrator=orchestrator, ui=ui)
     cli.run()
 
