@@ -25,14 +25,80 @@ from dataclasses import dataclass
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import get_app
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.formatted_text import HTML, FormattedText
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.shortcuts import print_formatted_text
+from prompt_toolkit.styles import Style
 
+class _SlashLexer(Lexer):
+    def lex_document(self, document):
+        text = document.text
+
+        def get_line(lineno):
+            s = text.lstrip()
+            if not s.startswith("/"):
+                return [("", text)]
+            body = s[1:]
+            # split on first whitespace but keep the rest (including trailing space)
+            space_idx = next((i for i, c in enumerate(body) if c in " \t"), None)
+            if space_idx is None:
+                cmd, rest = body.lower(), ""
+            else:
+                cmd, rest = body[:space_idx].lower(), body[space_idx:]
+            leading = text[: len(text) - len(s)]
+            if cmd in set(_COMMANDS):
+                return [("", leading), ("fg:#cba6f7 bold", "/" + cmd), ("", rest)]
+            return [("", text)]
+
+        return get_line
+
+
+_kb = KeyBindings()
+
+@_kb.add("backspace")
+def _backspace_and_complete(event):
+    event.current_buffer.delete_before_cursor()
+    if event.current_buffer.text.lstrip().startswith("/"):
+        event.current_buffer.start_completion(select_first=False)
+
+
+_COMPLETION_STYLE = Style.from_dict({
+    "completion-menu":                         "bg:#1e1e2e",
+    "completion-menu.completion":              "bg:#1e1e2e fg:#cdd6f4",
+    "completion-menu.completion.current":      "bg:#313244 fg:#cba6f7 bold",
+    "completion-menu.meta.completion":         "bg:#1e1e2e fg:#6c7086",
+    "completion-menu.meta.completion.current": "bg:#313244 fg:#a6adc8",
+    "scrollbar.background":                    "bg:#313244",
+    "scrollbar.button":                        "bg:#cba6f7",
+})
+
+from app.models import EventType
 from app.session import SessionMode
 
-_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "time", "help", "clear", "quit", "exit"]
+_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "time", "help", "clear", "quit"]
 _MODE_ARGS = ["strict", "soft"]
 _ALERT_THRESHOLDS = [60, 30, 10, 5, 1]  # minutes
+
+_COMMAND_META = {
+    "start":  "begin a focus session  /start \"goal\" <min>",
+    "stop":   "end current session",
+    "status": "show current session state",
+    "pause":  "pause session timer",
+    "resume": "resume after pause",
+    "mode":   "switch enforcement mode  strict|soft",
+    "time":   "adjust time  +20 | -10 | 45",
+    "help":   "show all commands",
+    "clear":  "clear the screen",
+    "quit":   "exit app",
+    "exit":   "exit app",
+}
+
+_MODE_META = {
+    "strict": "warn + close tab",
+    "soft":   "warn only",
+}
 
 
 class _SlashCompleter(Completer):
@@ -42,12 +108,26 @@ class _SlashCompleter(Completer):
             typed = text[len("/mode "):]
             for m in _MODE_ARGS:
                 if m.startswith(typed):
-                    yield Completion("/mode " + m, start_position=-len(text))
+                    yield Completion(
+                        "/mode " + m,
+                        start_position=-len(text),
+                        display=FormattedText([("bold", "/mode "), ("", m)]),
+                        display_meta=FormattedText([("fg:#6c7086", _MODE_META.get(m, ""))]),
+                    )
         elif text.startswith("/"):
             typed = text[1:]
-            for cmd in _COMMANDS:
-                if cmd.startswith(typed):
-                    yield Completion("/" + cmd, start_position=-len(text))
+            if " " in typed:  # already past the command name
+                return
+            matches = [cmd for cmd in _COMMANDS if cmd.startswith(typed)]
+            if len(matches) == 1 and matches[0] == typed:
+                return  # fully typed exact match — no popup
+            for cmd in matches:
+                yield Completion(
+                    "/" + cmd,
+                    start_position=-len(text),
+                    display=FormattedText([("fg:#cba6f7 bold", "/"), ("fg:#cdd6f4", cmd)]),
+                    display_meta=FormattedText([("fg:#6c7086", _COMMAND_META.get(cmd, ""))]),
+                )
 
 
 @dataclass
@@ -60,7 +140,7 @@ class Command:
 class CLI:
     """Reads input, parses commands, dispatches to orchestrator."""
 
-    PROMPT = "\n> "
+    PROMPT = "> "
 
     def __init__(self, orchestrator, ui) -> None:
         self.orchestrator = orchestrator
@@ -68,7 +148,21 @@ class CLI:
         self._running = False
         self._fired_alerts: set[int] = set()
         import sys
-        self._session = PromptSession(completer=_SlashCompleter(), complete_while_typing=True) if sys.stdin.isatty() else None
+        def _should_complete():
+            try:
+                text = get_app().current_buffer.text.lstrip()
+                if not text.startswith("/"):
+                    return False
+                typed = text[1:]
+                if " " in typed:
+                    return False
+                matches = [c for c in _COMMANDS if c.startswith(typed)]
+                if not matches or (len(matches) == 1 and matches[0] == typed):
+                    return False
+                return True
+            except Exception:
+                return False
+        self._session = PromptSession(completer=_SlashCompleter(), complete_while_typing=Condition(_should_complete), style=_COMPLETION_STYLE, key_bindings=_kb, lexer=_SlashLexer()) if sys.stdin.isatty() else None
         self._start_ticker()
         self._handlers = {
             "start": self._handle_start,
@@ -82,6 +176,7 @@ class CLI:
             "clear": self._handle_clear,
             "quit": self._handle_quit,
             "exit": self._handle_quit,
+            "q": self._handle_quit,
         }
 
     def run(self) -> None:
@@ -108,6 +203,7 @@ class CLI:
                 handler(cmd.args)
             except Exception as e:
                 self.ui.error(str(e))
+            self.ui.console.print()
 
     def _parse_command(self, line: str) -> Command | None:
         """Split '/cmd rest of line' → Command(name, args)."""
@@ -172,11 +268,12 @@ class CLI:
                 delta = int(raw)
             except ValueError:
                 raise ValueError("usage: /time +20 | /time -10 | /time 45")
-            s.adjust_time(delta)
+            word = "added" if delta > 0 else "removed"
+            label = f"{word} {abs(delta)} minute{'s' if abs(delta) != 1 else ''}"
+            self.orchestrator.adjust_time(delta, label)
             self._fired_alerts.clear()
             self._prefill_alerts()
-            word = "added" if delta > 0 else "removed"
-            self.ui.agent_say(f"{word} {abs(delta)} minute{'s' if abs(delta) != 1 else ''}.")
+            self.ui.agent_say(label + ".")
         else:
             try:
                 new_mins = int(raw)
@@ -187,6 +284,8 @@ class CLI:
             from datetime import timedelta
             current_elapsed = s.duration - s.time_remaining()
             s.duration = current_elapsed + timedelta(minutes=new_mins)
+            s.duration = current_elapsed + timedelta(minutes=new_mins)
+            self.orchestrator._log(EventType.TIME_ADJUSTED, reason=f"set to {new_mins}m from now")
             self._fired_alerts.clear()
             self._prefill_alerts()
             self.ui.agent_say(f"Time set to {new_mins} minutes from now.")
@@ -195,7 +294,7 @@ class CLI:
         self.ui.render_help()
 
     def _handle_clear(self, args: str) -> None:
-        self.ui.console.clear()
+        self.ui._clear()
 
     def _handle_quit(self, args: str) -> None:
         self.ui.info("bye")

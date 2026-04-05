@@ -50,6 +50,12 @@ class Orchestrator:
         self.session.resume()
         self._log(EventType.SESSION_RESUMED)
 
+    def adjust_time(self, minutes: int, label: str) -> None:
+        self._require_session()
+        assert self.session is not None
+        self.session.adjust_time(minutes)
+        self._log(EventType.TIME_ADJUSTED, reason=label)
+
     def set_mode(self, mode: SessionMode) -> None:
         self._require_session()
         assert self.session is not None

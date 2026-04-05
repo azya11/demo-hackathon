@@ -39,6 +39,7 @@ _EVENT_COLORS = {
     "tab_observed": "dim",
     "ai_classified": "magenta",
     "mode_changed": "medium_purple1",
+    "time_adjusted": "cyan",
 }
 
 _EVENT_FEED_LIMIT = 7
@@ -57,10 +58,15 @@ class UI:
     def __init__(self) -> None:
         self.console = Console()
 
+    def _clear(self) -> None:
+        """Clear visible screen and scrollback buffer."""
+        self.console.file.write("\033[2J\033[3J\033[H")
+        self.console.file.flush()
+
     # --- top-level screens (each clears first) ---
 
     def render_welcome(self) -> None:
-        self.console.clear()
+        self._clear()
         body = (
             "An agent that protects your focus, not just tracks it.\n"
             'Type [medium_purple1]/help[/medium_purple1] for commands, [medium_purple1]/start "goal" 60[/medium_purple1] to begin.'
@@ -69,7 +75,7 @@ class UI:
 
     def render_dashboard(self, session, events, context=None, message: str | None = None) -> None:
         """Clear + show the full dashboard; optionally append an agent message."""
-        self.console.clear()
+        self._clear()
         self._print_header()
 
         if session is None:
@@ -82,7 +88,6 @@ class UI:
             lines = [
                 f"[bold]Session:[/bold] [{color}]{session.status.value.upper()}[/{color}]",
                 f"[bold]Goal:[/bold] {session.goal}",
-                f"[bold]Time left:[/bold] {_format_duration(session.time_remaining())}",
                 f"[bold]Mode:[/bold] {session.mode.value}",
                 f"[bold]Offenses:[/bold] {session.offense_count}",
             ]
@@ -123,7 +128,6 @@ class UI:
         lines = "\n".join([
             f"[bold]Session:[/bold] [{color}]{session.status.value.upper()}[/{color}]",
             f"[bold]Goal:[/bold] {session.goal}",
-            f"[bold]Time left:[/bold] {_format_duration(session.time_remaining())}",
             f"[bold]Mode:[/bold] {session.mode.value}",
             f"[bold]Offenses:[/bold] {session.offense_count}",
         ])
@@ -131,7 +135,7 @@ class UI:
 
     def render_summary(self, session, events) -> None:
         """Post-session analytics."""
-        self.console.clear()
+        self._clear()
         self._print_header()
         if session.started_at and session.ended_at:
             active_time = (session.ended_at - session.started_at) - session.paused_duration
@@ -146,7 +150,7 @@ class UI:
         self.console.print(Panel(body, title="Session Summary", border_style="blue"))
 
     def render_help(self) -> None:
-        self.console.clear()
+        self._clear()
         self._print_header()
         table = Table(title="Commands", header_style="bold medium_purple1", border_style="dim")
         table.add_column("Command", style="medium_purple1", no_wrap=True)
