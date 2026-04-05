@@ -22,6 +22,8 @@ class EventType(str, Enum):
     TAB_CLOSED = "tab_closed"
     AI_CLASSIFIED = "ai_classified"
     MODE_CHANGED = "mode_changed"
+    PROCESS_KILLED = "process_killed"
+    PROCESS_OBSERVED = "process_observed"
 
 
 @dataclass

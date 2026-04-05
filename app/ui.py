@@ -11,9 +11,11 @@ layer on top of the last screen until the next command triggers a redraw.
 
 from __future__ import annotations
 
+import time
 from datetime import timedelta
 
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
@@ -93,6 +95,39 @@ class UI:
         if message:
             self.console.print()
             self.agent_say(message)
+
+    def render_live_status(self, get_session, get_events) -> None:
+        """Show a live-updating dashboard that ticks every second. Ctrl+C to exit."""
+        self.console.print("[dim]Live status · Ctrl+C to return to prompt[/dim]")
+        try:
+            with Live(
+                self._build_status_panel(get_session(), get_events()),
+                console=self.console,
+                refresh_per_second=2,
+                transient=False,
+            ) as live:
+                while True:
+                    time.sleep(0.5)
+                    live.update(self._build_status_panel(get_session(), get_events()))
+        except KeyboardInterrupt:
+            pass
+
+    def _build_status_panel(self, session, events) -> Panel:
+        """Return a Rich Panel renderable for the current session (no side effects)."""
+        if session is None:
+            return Panel.fit(
+                'No active session. Type [cyan]/start "goal" <minutes>[/cyan] to begin.',
+                border_style="dim",
+            )
+        color = _STATUS_COLORS.get(session.status.value, "white")
+        lines = "\n".join([
+            f"[bold]Session:[/bold] [{color}]{session.status.value.upper()}[/{color}]",
+            f"[bold]Goal:[/bold] {session.goal}",
+            f"[bold]Time left:[/bold] {_format_duration(session.time_remaining())}",
+            f"[bold]Mode:[/bold] {session.mode.value}",
+            f"[bold]Offenses:[/bold] {session.offense_count}",
+        ])
+        return Panel(lines, title="[bold]Focus Guardian[/bold]", border_style=color)
 
     def render_summary(self, session, events) -> None:
         """Post-session analytics."""
@@ -181,8 +216,16 @@ class UI:
             ("/pause", "Pause session timer (offers typing game)"),
             ("/resume", "Resume after pause"),
             ("/mode strict|soft", "Switch enforcement mode"),
+            ("/time +20 | -10 | 45", "Add, remove, or set session time"),
+            ("/block <domain>", "Add a site to the blocklist"),
+            ("/allow <domain>", "Add a site to the allowlist"),
+            ("/blocks", "Show current block/allow lists"),
+            ("/pblock <proc.exe>", "Add a process to the blocklist"),
+            ("/pallow <proc.exe>", "Add a process to the allowlist"),
+            ("/pblocks", "Show current process block/allow lists"),
             ("/gamestats", "Show typing game statistics"),
             ("/help", "Show this help"),
+            ("/clear", "Clear screen and redraw"),
             ("/quit", "Exit app"),
         ]
         for cmd, desc in rows:

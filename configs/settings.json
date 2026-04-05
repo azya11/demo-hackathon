@@ -7,6 +7,8 @@
     "block_from_offense": 3
   },
   "browser": {
+    "mode": "attach",
+    "cdp_url": "http://127.0.0.1:9222",
     "headless": false,
     "start_url": "about:blank"
   },
