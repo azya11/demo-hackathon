@@ -3,6 +3,10 @@
 Uses Rich to render the dashboard: session header, live state, event feed,
 agent decisions. Keeps all presentation logic here — other modules should
 never print() directly.
+
+Each top-level screen clears the console first so the terminal only shows
+the current frame. Inline messages (info/warn/error) never clear — they
+layer on top of the last screen until the next command triggers a redraw.
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ _EVENT_COLORS = {
     "ai_classified": "magenta",
 }
 
+_EVENT_FEED_LIMIT = 7
+
 
 def _format_duration(td: timedelta) -> str:
     total = max(int(td.total_seconds()), 0)
@@ -48,56 +54,49 @@ class UI:
     def __init__(self) -> None:
         self.console = Console()
 
-    # --- top-level screens ---
+    # --- top-level screens (each clears first) ---
 
     def render_welcome(self) -> None:
+        self.console.clear()
         body = (
             "An agent that protects your focus, not just tracks it.\n"
             'Type [cyan]/help[/cyan] for commands, [cyan]/start "goal" 60[/cyan] to begin.'
         )
         self.console.print(Panel.fit(body, title="[bold cyan]Focus Guardian AI v0.1[/]", border_style="cyan"))
 
-    def render_dashboard(self, session, events, context=None) -> None:
-        """Redraw the full dashboard with current session + context."""
+    def render_dashboard(self, session, events, context=None, message: str | None = None) -> None:
+        """Clear + show the full dashboard; optionally append an agent message."""
+        self.console.clear()
+        self._print_header()
+
         if session is None:
             self.console.print(Panel.fit(
                 'No active session. Type [cyan]/start "goal" <minutes>[/cyan] to begin.',
-                title="Focus Guardian",
                 border_style="dim",
             ))
-            return
+        else:
+            color = _STATUS_COLORS.get(session.status.value, "white")
+            lines = [
+                f"[bold]Session:[/bold] [{color}]{session.status.value.upper()}[/{color}]",
+                f"[bold]Goal:[/bold] {session.goal}",
+                f"[bold]Time left:[/bold] {_format_duration(session.time_remaining())}",
+                f"[bold]Mode:[/bold] {session.mode.value}",
+                f"[bold]Offenses:[/bold] {session.offense_count}",
+            ]
+            if context is not None:
+                lines.append(f"[bold]Current tab:[/bold] {context.title}")
+            self.console.print(Panel("\n".join(lines), title="Focus Guardian", border_style=color))
+            if events:
+                self._render_event_feed(events)
 
-        color = _STATUS_COLORS.get(session.status.value, "white")
-        lines = [
-            f"[bold]Session:[/bold] [{color}]{session.status.value.upper()}[/{color}]",
-            f"[bold]Goal:[/bold] {session.goal}",
-            f"[bold]Time left:[/bold] {_format_duration(session.time_remaining())}",
-            f"[bold]Mode:[/bold] {session.mode.value}",
-            f"[bold]Offenses:[/bold] {session.offense_count}",
-        ]
-        if context is not None:
-            lines.append(f"[bold]Current tab:[/bold] {context.title}")
-        self.console.print(Panel("\n".join(lines), title="Focus Guardian", border_style=color))
-
-        if events:
-            self.render_event_feed(events)
-
-    def render_event_feed(self, events, limit: int = 10) -> None:
-        """Last N events with colored severity."""
-        table = Table(show_header=False, box=None, padding=(0, 1), title="Recent activity", title_style="dim")
-        table.add_column(style="dim", no_wrap=True)
-        table.add_column()
-        for e in events[-limit:]:
-            ts = e.created_at.strftime("%H:%M:%S")
-            color = _EVENT_COLORS.get(e.type.value, "white")
-            label = e.type.value.replace("_", " ")
-            detail = e.reason or e.url or ""
-            line = f"[{color}]*[/{color}] {label}" + (f" - {detail}" if detail else "")
-            table.add_row(ts, line)
-        self.console.print(table)
+        if message:
+            self.console.print()
+            self.agent_say(message)
 
     def render_summary(self, session, events) -> None:
         """Post-session analytics."""
+        self.console.clear()
+        self._print_header()
         if session.started_at and session.ended_at:
             active_time = (session.ended_at - session.started_at) - session.paused_duration
         else:
@@ -111,6 +110,8 @@ class UI:
         self.console.print(Panel(body, title="Session Summary", border_style="blue"))
 
     def render_help(self) -> None:
+        self.console.clear()
+        self._print_header()
         table = Table(title="Commands", header_style="bold cyan", border_style="dim")
         table.add_column("Command", style="cyan", no_wrap=True)
         table.add_column("Description")
@@ -128,7 +129,7 @@ class UI:
             table.add_row(cmd, desc)
         self.console.print(table)
 
-    # --- inline messages ---
+    # --- inline messages (no clear — layer on last screen) ---
 
     def info(self, message: str) -> None:
         self.console.print(f"[cyan]i[/cyan] {message}")
@@ -142,3 +143,22 @@ class UI:
     def agent_say(self, message: str) -> None:
         """Styled message from the agent itself."""
         self.console.print(f"[magenta]>[/magenta] [italic]{message}[/italic]")
+
+    # --- internals ---
+
+    def _print_header(self) -> None:
+        self.console.print("[bold cyan]Focus Guardian AI[/bold cyan] [dim]v0.1[/dim]")
+        self.console.print()
+
+    def _render_event_feed(self, events, limit: int = _EVENT_FEED_LIMIT) -> None:
+        table = Table(show_header=False, box=None, padding=(0, 1), title="Recent activity", title_style="dim")
+        table.add_column(style="dim", no_wrap=True)
+        table.add_column()
+        for e in events[-limit:]:
+            ts = e.created_at.strftime("%H:%M:%S")
+            color = _EVENT_COLORS.get(e.type.value, "white")
+            label = e.type.value.replace("_", " ")
+            detail = e.reason or e.url or ""
+            line = f"[{color}]*[/{color}] {label}" + (f" - {detail}" if detail else "")
+            table.add_row(ts, line)
+        self.console.print(table)

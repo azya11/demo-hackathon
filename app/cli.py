@@ -102,29 +102,27 @@ class CLI:
             raise ValueError("minutes must be positive")
         mode = self._parse_mode(parts[2]) if len(parts) > 2 else SessionMode.STRICT
         self.orchestrator.start_session(goal, minutes, mode)
-        self.ui.agent_say(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
-        self.ui.render_dashboard(self.orchestrator.session, self.orchestrator.recent_events())
+        self._refresh(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
 
     def _handle_stop(self, args: str) -> None:
         session = self.orchestrator.stop_session()
-        self.ui.agent_say("Session stopped.")
         self.ui.render_summary(session, self.orchestrator.events)
 
     def _handle_status(self, args: str) -> None:
-        self.ui.render_dashboard(self.orchestrator.session, self.orchestrator.recent_events())
+        self._refresh()
 
     def _handle_pause(self, args: str) -> None:
         self.orchestrator.pause_session()
-        self.ui.agent_say("Session paused.")
+        self._refresh("Session paused.")
 
     def _handle_resume(self, args: str) -> None:
         self.orchestrator.resume_session()
-        self.ui.agent_say("Session resumed.")
+        self._refresh("Session resumed.")
 
     def _handle_mode(self, args: str) -> None:
         mode = self._parse_mode(args.strip())
         self.orchestrator.set_mode(mode)
-        self.ui.agent_say(f"Mode set to {mode.value}.")
+        self._refresh(f"Mode set to {mode.value}.")
 
     def _handle_help(self, args: str) -> None:
         self.ui.render_help()
@@ -132,6 +130,16 @@ class CLI:
     def _handle_quit(self, args: str) -> None:
         self.ui.info("bye")
         self._running = False
+
+    # --- helpers ---
+
+    def _refresh(self, message: str | None = None) -> None:
+        """Redraw the dashboard (clears previous frame)."""
+        self.ui.render_dashboard(
+            self.orchestrator.session,
+            self.orchestrator.recent_events(),
+            message=message,
+        )
 
     @staticmethod
     def _parse_mode(raw: str) -> SessionMode:
