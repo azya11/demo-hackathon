@@ -5,5 +5,6 @@ venv/
 data/*.db
 .env
 .DS_Store
+configs/*.json
 !configs/settings.json
 !configs/blocked_sites.json
