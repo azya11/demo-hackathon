@@ -72,6 +72,7 @@ _COMPLETION_STYLE = Style.from_dict({
     "completion-menu.meta.completion.current": "bg:#313244 fg:#a6adc8",
     "scrollbar.background":                    "bg:#313244",
     "scrollbar.button":                        "bg:#cba6f7",
+    "bottom-toolbar":                          "bg:#181825 fg:#6c7086 noreverse",
 })
 
 from app.models import EventType
@@ -234,7 +235,7 @@ class CLI:
         self.orchestrator.start_session(goal, minutes, mode)
         self._fired_alerts.clear()
         self._prefill_alerts()
-        self.ui.agent_say(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
+        self._refresh(f'Session started. Goal: "{goal}". Time: {minutes}m. Mode: {mode.value}.')
 
     def _handle_stop(self, args: str) -> None:
         session = self.orchestrator.stop_session()
@@ -339,19 +340,80 @@ class CLI:
                 except Exception:
                     pass
 
-    def _toolbar(self) -> str:
+    def _toolbar(self):
+        from prompt_toolkit.formatted_text import FormattedText
+        DIM  = "fg:#585b70"
+        MED  = "fg:#a6adc8"
         s = self.orchestrator.session
+
         if s is None or s.status.value in ("stopped", "completed"):
-            return " Focus Guardian  ·  No active session  ·  /start \"goal\" <minutes> to begin"
-        total = max(int(s.time_remaining().total_seconds()), 0)
-        h, rem = divmod(total, 3600)
+            return FormattedText([
+                ("fg:#cba6f7",  "  ◆  Focus Guardian"),
+                (DIM,           "  ─────────────────────────────────────────────"),
+                ("",            "\n"),
+                (DIM,           "  no active session  ·  "),
+                (MED,           '/start "goal" <minutes>'),
+                (DIM,           "  to begin"),
+            ])
+
+        # time remaining
+        total_secs = max(int(s.time_remaining().total_seconds()), 0)
+        h, rem = divmod(total_secs, 3600)
         m, sec = divmod(rem, 60)
         time_str = f"{h:02d}:{m:02d}:{sec:02d}"
-        status = s.status.value.upper()
-        return (
-            f" Focus Guardian  ·  {status}  ·  {s.goal}\n"
-            f" Time left: {time_str}  ·  Mode: {s.mode.value}  ·  Offenses: {s.offense_count}"
-        )
+
+        # elapsed
+        if s.started_at is not None:
+            from datetime import datetime
+            elapsed_secs = max(int((datetime.now() - s.started_at - s.paused_duration).total_seconds()), 0)
+            if s.status.value == "paused" and s.pause_started_at:
+                elapsed_secs = max(int((s.pause_started_at - s.started_at - s.paused_duration).total_seconds()), 0)
+            eh, er = divmod(elapsed_secs, 3600)
+            em, es = divmod(er, 60)
+            elapsed_str = f"{eh:02d}:{em:02d}:{es:02d}"
+        else:
+            elapsed_str = "00:00:00"
+
+        # progress bar (24 wide)
+        dur  = max(s.duration.total_seconds(), 1)
+        frac = max(0.0, min(1.0, total_secs / dur))
+        filled = round(frac * 24)
+        bar = "█" * filled + "░" * (24 - filled)
+        if frac > 0.5:
+            bar_color = "fg:#a6e3a1"
+        elif frac > 0.25:
+            bar_color = "fg:#f9e2af"
+        else:
+            bar_color = "fg:#f38ba8"
+
+        icons  = {"active": "▶", "paused": "⏸", "stopped": "■", "completed": "✓", "idle": "◌"}
+        colors = {"active": "fg:#a6e3a1", "paused": "fg:#f9e2af", "stopped": "fg:#f38ba8", "completed": "fg:#89b4fa", "idle": "fg:#585b70"}
+        icon     = icons.get(s.status.value, "·")
+        st_color = colors.get(s.status.value, "fg:#cdd6f4")
+        mode_color = "fg:#f38ba8" if s.mode.value == "strict" else "fg:#94e2d5"
+        off_color  = "fg:#a6e3a1" if s.offense_count == 0 else ("fg:#f9e2af" if s.offense_count < 3 else "fg:#f38ba8")
+        goal = s.goal if len(s.goal) <= 36 else s.goal[:34] + "…"
+
+        return FormattedText([
+            # ── line 1 ──────────────────────────────────────────
+            ("fg:#cba6f7",  "  ◆  Focus Guardian"),
+            (DIM,           "  │  "),
+            (st_color,      f"{icon}  {s.status.value.upper()}"),
+            (DIM,           "  │  "),
+            ("fg:#cdd6f4",  f'"{goal}"'),
+            (DIM,           "  │  "),
+            (mode_color,    s.mode.value),
+            (DIM,           "  │  "),
+            (off_color,     f"⚠  {s.offense_count} offense{'s' if s.offense_count != 1 else ''}"),
+            ("",            "\n"),
+            # ── line 2 ──────────────────────────────────────────
+            (DIM,           "  "),
+            (bar_color,     bar),
+            (DIM,           f"  {int(frac * 100):3d}%  │  "),
+            ("fg:#94e2d5",  f"⏱  {time_str} left"),
+            (DIM,           "  │  elapsed  "),
+            (MED,           elapsed_str),
+        ])
 
     def _refresh(self, message: str | None = None) -> None:
         """Redraw the dashboard (clears previous frame)."""
