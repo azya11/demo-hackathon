@@ -1,0 +1,19 @@
+{
+  "blocklist": [
+    "youtube.com",
+    "tiktok.com",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+    "twitch.tv",
+    "reddit.com",
+    "facebook.com"
+  ],
+  "allowlist": [
+    "canvas.asu.edu",
+    "docs.google.com",
+    "github.com",
+    "stackoverflow.com",
+    "wikipedia.org"
+  ]
+}
