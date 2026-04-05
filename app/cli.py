@@ -11,6 +11,7 @@ Commands:
     /resume                        Resume after pause
     /mode strict|soft              Switch enforcement mode
     /help                          List commands
+    /clear                         Clear screen and redraw
     /quit                          Exit app
 """
 
@@ -27,7 +28,7 @@ from prompt_toolkit.completion import Completer, Completion
 
 from app.session import SessionMode
 
-_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "help", "quit", "exit"]
+_COMMANDS = ["start", "stop", "status", "pause", "resume", "mode", "help", "clear", "quit", "exit"]
 _MODE_ARGS = ["strict", "soft"]
 
 
@@ -73,6 +74,7 @@ class CLI:
             "resume": self._handle_resume,
             "mode": self._handle_mode,
             "help": self._handle_help,
+            "clear": self._handle_clear,
             "quit": self._handle_quit,
             "exit": self._handle_quit,
         }
@@ -153,6 +155,9 @@ class CLI:
 
     def _handle_help(self, args: str) -> None:
         self.ui.render_help()
+
+    def _handle_clear(self, args: str) -> None:
+        self.ui.console.clear()
 
     def _handle_quit(self, args: str) -> None:
         self.ui.info("bye")

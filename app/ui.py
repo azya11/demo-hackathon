@@ -159,6 +159,7 @@ class UI:
             ("/resume", "Resume after pause"),
             ("/mode strict|soft", "Switch enforcement mode"),
             ("/help", "Show this help"),
+            ("/clear", "Clear screen and redraw"),
             ("/quit", "Exit app"),
         ]
         for cmd, desc in rows:
