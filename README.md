@@ -1,73 +1,72 @@
 # Focus Guardian AI
 
-An agent that protects your focus, not just tracks it.
+An AI focus companion that does more than track time. It watches for distractions, explains what it sees, and takes action when a session drifts off course.
 
-## Overview
+## What It Is
 
-Terminal-first AI agent that watches your browsing context during a focus session,
-detects distractions, and takes real action (warn, close tab, redirect) to keep you
-aligned with your stated goal.
+Focus Guardian AI is a terminal-first productivity assistant built for focused work sessions and hackathon demos. It combines session management, distraction detection, and policy-driven interventions in a single CLI experience.
 
-## Architecture
+## Screenshots
 
-```
-┌─────────────────────────────┐
-│        Terminal UI          │  ui.py (Rich)
-│  commands, logs, session    │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│      Agent Orchestrator     │  orchestrator.py
-│ session loop + decisions    │
-└───────┬─────────┬───────────┘
-        │         │
-        ▼         ▼
-┌──────────────┐  ┌──────────────────┐
-│ Context      │  │ Policy Engine    │
-│ Collector    │  │ rules + AI judge │
-│ detector.py  │  │ policy.py + ai.py│
-└──────┬───────┘  └──────────────────┘
-       │
-       ▼
-┌─────────────────────────────┐
-│        Tool Layer           │  tools.py
-│ close tab / warn / redirect │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│ Local persistence / memory  │  storage.py
-│ session state, events, logs │
-└─────────────────────────────┘
-```
+<p align="center">
+        <img src="landing_screen.png" width="49%" alt="Focus Guardian AI home screen" />
+        <img src="cmd_list.png" width="49%" alt="Focus Guardian AI command palette" />
+</p>
 
-## Module responsibilities
+<p align="center">
+        <img src="settings_menu.png" width="49%" alt="Focus Guardian AI settings panel" />
+</p>
+
+## Why It Stands Out
+
+- Designed for a real workflow, not a toy demo
+- Rules-first decision engine with AI used only when context is ambiguous
+- Clear terminal UX with fast command completion and session visibility
+- Action-oriented behavior: warn, block, or redirect when needed
+- Built to be stable in a controlled demo environment
+
+## Core Capabilities
+
+- Start and manage focus sessions from the terminal
+- Inspect session status, summaries, and live logs
+- Detect distracting browsing behavior in a controlled Playwright session
+- Apply soft or strict enforcement modes
+- Keep user-defined allow and block lists
+
+## How It Works
+
+1. The terminal UI captures commands and shows the current session state.
+2. The orchestrator coordinates the session loop and decision flow.
+3. The detector reads browser and window context from the active session.
+4. The policy engine decides whether to allow, warn, or block.
+5. The tools layer applies the action and records the outcome.
+
+## Project Structure
 
 | Module | Responsibility |
 |---|---|
-| `main.py` | Entry point, wires dependencies, starts CLI |
-| `cli.py` | Parse terminal commands (`/start`, `/status`, `/stop`, `/pause`, etc.) |
-| `ui.py` | Render dashboard, event feed, status panels via Rich |
-| `orchestrator.py` | Main polling loop, coordinate detector → policy → tools |
-| `session.py` | Session lifecycle (create, pause, resume, stop, timer) |
-| `policy.py` | Rules-first decision engine (allow / warn / block) |
-| `detector.py` | Read active window title, browser URL via Playwright |
-| `tools.py` | Agent actions: close tab, warn user, open URL, log event |
-| `ai.py` | Gemini integration for ambiguous classification + explanations |
-| `storage.py` | SQLite persistence for sessions, events, analytics |
-| `models.py` | Dataclasses: Session, Event, Decision, Context |
+| [main.py](app/main.py) | Application entry point and dependency wiring |
+| [cli.py](app/cli.py) | Slash-command parsing and command dispatch |
+| [ui.py](app/ui.py) | Terminal dashboard, logs, and session panels |
+| [orchestrator.py](app/orchestrator.py) | Main session loop and decision flow |
+| [session.py](app/session.py) | Session lifecycle and timer management |
+| [policy.py](app/policy.py) | Rules-first decision engine |
+| [detector.py](app/detector.py) | Browser and window context collection |
+| [tools.py](app/tools.py) | Enforcement actions such as warn, block, redirect |
+| [ai.py](app/ai.py) | Gemini-based classification for ambiguous cases |
+| [storage.py](app/storage.py) | Persistence for sessions, events, and analytics |
+| [models.py](app/models.py) | Data models used across the app |
 
-## Scope (hackathon MVP)
+## Demo Scope
 
-- Controlled Playwright browser (not arbitrary OS browsers) for demo stability
-- Rules-first policy with AI only for ambiguous cases
-- 3 core commands: `/start`, `/status`, `/stop`
-- 2 modes: soft (warn only), strict (warn + close tab)
+- Controlled Playwright browser instead of arbitrary system browsers
+- Rules-first policy with AI escalation only when needed
+- Focused command set for a polished demo flow
+- Two operating modes: soft enforcement and strict enforcement
 
 ## Commands
 
-```
+```text
 /start "Study OS for 90 min"
 /stop
 /status
@@ -82,11 +81,13 @@ aligned with your stated goal.
 ## Installation
 
 **macOS / Linux**
+
 ```bash
 pip3 install rich prompt_toolkit
 ```
 
-**Windows** (if `pip.exe` is blocked by Application Control policy)
+**Windows**
+
 ```powershell
 .venv/Scripts/python.exe -m pip install rich prompt_toolkit
 ```
@@ -94,20 +95,22 @@ pip3 install rich prompt_toolkit
 ## Running
 
 **macOS / Linux**
+
 ```bash
 python3 -m app.main
 ```
 
 **Windows**
+
 ```powershell
 .venv/Scripts/python.exe -m app.main
 ```
 
-## Stack
+## Tech Stack
 
 - Python 3.11+
-- Rich — terminal UI
-- prompt_toolkit — live slash-command completion
-- Playwright — controlled browser session
-- Google Generative AI (Gemini) — reasoning layer
-- SQLite — persistence
+- Rich for terminal rendering
+- prompt_toolkit for interactive command completion
+- Playwright for controlled browser context
+- Google Generative AI (Gemini) for reasoning on edge cases
+- SQLite for local persistence
