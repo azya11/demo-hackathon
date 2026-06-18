@@ -10,6 +10,9 @@ Focus Guardian AI is a terminal-first productivity assistant built for focused w
 
 <p align="center">
         <img src="landing_screen.png" width="49%" alt="Focus Guardian AI home screen" />
+</p>
+
+<p align="center">
         <img src="cmd_list.png" width="49%" alt="Focus Guardian AI command palette" />
 </p>
 
