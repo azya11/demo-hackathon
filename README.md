@@ -2,6 +2,10 @@
 
 An AI focus companion that does more than track time. It watches for distractions, explains what it sees, and takes action when a session drifts off course.
 
+## Demo
+
+[▶ Watch the demo video](https://youtu.be/UIfMrH4wqYw)
+
 ## What It Is
 
 Focus Guardian AI is a terminal-first productivity assistant built for focused work sessions and hackathon demos. It combines session management, distraction detection, and policy-driven interventions in a single CLI experience.
